@@ -2,9 +2,9 @@
 #include <stdexcept>
 #include <iostream>
 
-// Include the newly generated shader headers
 #include "traditional_vert_spv.h"
 #include "traditional_frag_spv.h"
+#include <glm/glm.hpp>
 
 namespace Engine::Graphics {
 
@@ -29,7 +29,6 @@ namespace Engine::Graphics {
         VkShaderModuleCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
         createInfo.codeSize = size;
-        // Cast the raw byte array into 32-bit integers for Vulkan
         createInfo.pCode = reinterpret_cast<const uint32_t*>(code);
 
         VkShaderModule shaderModule;
@@ -70,10 +69,24 @@ namespace Engine::Graphics {
     void GraphicsPipeline::createPipelineLayout() {
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipelineLayoutInfo.setLayoutCount = 1;
-        pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
-        pipelineLayoutInfo.pushConstantRangeCount = 0; 
-        pipelineLayoutInfo.pPushConstantRanges = nullptr;
+        
+        // =====================================================================
+        // --- THE STRICT DRIVER FIX ---
+        // =====================================================================
+        // Since we have not yet allocated a VkDescriptorSet for our 3D models, 
+        // we must explicitly tell the GPU to expect ZERO sets. If we leave this at 1,
+        // Intel drivers will silently abort the vkCmdDraw call!
+        pipelineLayoutInfo.setLayoutCount = 0;
+        pipelineLayoutInfo.pSetLayouts = nullptr;
+        // =====================================================================
+
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(glm::mat4);
+
+        pipelineLayoutInfo.pushConstantRangeCount = 1; 
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
         if (vkCreatePipelineLayout(m_context.getDevice(), &pipelineLayoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
             throw std::runtime_error("Critical Error: Failed to create Vulkan Pipeline Layout!");
@@ -87,8 +100,6 @@ namespace Engine::Graphics {
 
         if (m_type == PipelineType::Traditional) {
             std::cout << "[Pipeline Router] Assembling Fallback TRADITIONAL Pipeline...\n";
-            
-            // Convert embedded C++ arrays into Vulkan modules
             vertShaderModule = createShaderModule(traditional_vert_spv, traditional_vert_spv_len);
             fragShaderModule = createShaderModule(traditional_frag_spv, traditional_frag_spv_len);
 
@@ -96,7 +107,7 @@ namespace Engine::Graphics {
             vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
             vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
             vertShaderStageInfo.module = vertShaderModule;
-            vertShaderStageInfo.pName = "main"; // Entry point in HLSL
+            vertShaderStageInfo.pName = "main"; 
 
             VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
             fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -108,51 +119,42 @@ namespace Engine::Graphics {
             shaderStages.push_back(fragShaderStageInfo);
         } else {
             std::cout << "[Pipeline Router] Assembling Cutting-Edge MESHLET Pipeline...\n";
-            // Mesh/Task shaders will go here in the future
             throw std::runtime_error("Meshlet pipeline shaders not yet implemented!");
         }
 
-        // --- PIPELINE FIXED FUNCTION STATES ---
-
-        // 1. Vertex Input (Empty for now because our HLSL hardcodes the triangle)
         VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
         vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
         vertexInputInfo.vertexBindingDescriptionCount = 0;
         vertexInputInfo.vertexAttributeDescriptionCount = 0;
 
-        // 2. Input Assembly (Tell GPU to draw Triangles, not Points or Lines)
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-        // 3. Viewport and Scissor (We use dynamic states so we don't have to rebuild the pipeline on window resize)
         VkPipelineViewportStateCreateInfo viewportState{};
         viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
         viewportState.viewportCount = 1;
         viewportState.scissorCount = 1;
 
-        // 4. Rasterizer (Converts geometry into pixels)
         VkPipelineRasterizationStateCreateInfo rasterizer{};
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.depthClampEnable = VK_FALSE;
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
-        rasterizer.polygonMode = VK_POLYGON_MODE_FILL; // Solid geometry
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL; 
         rasterizer.lineWidth = 1.0f;
-        rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;   // Standard AAA culling
+        rasterizer.cullMode = VK_CULL_MODE_NONE;   
         rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
         rasterizer.depthBiasEnable = VK_FALSE;
 
-        // 5. Multisampling (Disabled for now)
         VkPipelineMultisampleStateCreateInfo multisampling{};
         multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
         multisampling.sampleShadingEnable = VK_FALSE;
         multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-        // 6. Color Blending (How new pixels mix with old pixels on the screen)
         VkPipelineColorBlendAttachmentState colorBlendAttachment{};
         colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        colorBlendAttachment.blendEnable = VK_FALSE; // No transparency yet
+        colorBlendAttachment.blendEnable = VK_FALSE; 
 
         VkPipelineColorBlendStateCreateInfo colorBlending{};
         colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -160,7 +162,6 @@ namespace Engine::Graphics {
         colorBlending.attachmentCount = 1;
         colorBlending.pAttachments = &colorBlendAttachment;
 
-        // 7. Dynamic States (Allows resizing window without rebuilding pipeline)
         std::vector<VkDynamicState> dynamicStates = {
             VK_DYNAMIC_STATE_VIEWPORT,
             VK_DYNAMIC_STATE_SCISSOR
@@ -170,7 +171,6 @@ namespace Engine::Graphics {
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
         dynamicState.pDynamicStates = dynamicStates.data();
 
-        // --- ASSEMBLE THE GRAPHICS PIPELINE ---
         VkGraphicsPipelineCreateInfo pipelineInfo{};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
         pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
@@ -192,7 +192,6 @@ namespace Engine::Graphics {
 
         std::cout << "Graphics Pipeline successfully assembled from embedded HLSL shaders.\n";
 
-        // Safely destroy the raw shader modules now that the pipeline is built
         vkDestroyShaderModule(m_context.getDevice(), vertShaderModule, nullptr);
         vkDestroyShaderModule(m_context.getDevice(), fragShaderModule, nullptr);
     }

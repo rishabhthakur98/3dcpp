@@ -1,24 +1,25 @@
 #pragma once
 
 #include "../core/Window.hpp"
-#include "../core/Config.hpp" // Needed to check user preferences
+#include "../core/Config.hpp"
 #include "VulkanContext.hpp"
 #include "Swapchain.hpp"
 #include "RenderPass.hpp"
 #include "GraphicsPipeline.hpp"
 #include <vector>
 #include <memory>
+#include <glm/glm.hpp>
 
 namespace Engine::Graphics {
 
     class Renderer {
     public:
-        // The Renderer now requires the Config object to read user settings
         Renderer(Core::Window& window, Core::Config& config);
         ~Renderer();
 
         void beginUI();
-        void drawFrame();
+        // Updated to accept the Push Constant data
+        void drawFrame(const glm::mat4& viewProj);
         void uploadDataToSSBO(const std::vector<float>& data);
 
         const GpuSpecs& getGpuSpecs() const { return m_vulkanContext->getGpuSpecs(); }
@@ -30,8 +31,6 @@ namespace Engine::Graphics {
         std::unique_ptr<VulkanContext> m_vulkanContext;
         std::unique_ptr<Swapchain> m_swapchain; 
         std::unique_ptr<RenderPass> m_renderPass;
-        
-        // --- NEW: The Graphics Pipeline Router ---
         std::unique_ptr<GraphicsPipeline> m_graphicsPipeline;
         
         std::vector<VkFramebuffer> m_swapchainFramebuffers;

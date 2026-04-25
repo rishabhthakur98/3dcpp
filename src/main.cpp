@@ -32,21 +32,26 @@ int main() {
         }
 
         Engine::Core::Window window(winWidth, winHeight, isFullscreen, "3D C++ Engine (AAA Bindless)");
-        
-        // --- THE FIX: Pass config into the Renderer ---
         Engine::Graphics::Renderer renderer(window, config);
         Engine::Graphics::ModelLoader modelLoader;
-        
         Engine::Game::GameManager gameManager(window, config, renderer, modelLoader);
+
+        // Track time to calculate precise Delta Time
+        auto lastTime = std::chrono::high_resolution_clock::now();
 
         while (!window.shouldClose() && !gameManager.shouldQuit()) {
             
+            auto currentTime = std::chrono::high_resolution_clock::now();
+            float dt = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
+            lastTime = currentTime;
+
             auto frameStart = std::chrono::high_resolution_clock::now();
             window.pollEvents();
 
             renderer.beginUI();
-            gameManager.update();
-            renderer.drawFrame();
+            
+            // Pass the Delta Time into the GameManager so the Camera moves smoothly
+            gameManager.update(dt);
 
             if (config.getBool("limit_frames", true)) {
                 int targetFps = config.getInt("target_fps", 60);

@@ -20,6 +20,8 @@ cmake_install.cmake
 *.so
 *.out
 *.app
+*.glb
+*.gltf
 
 # --- Shader Artifacts ---
 # Ignore compiled SPIR-V binaries and generated headers 

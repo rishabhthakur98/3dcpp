@@ -35,8 +35,6 @@ namespace Engine::Graphics {
 
         if (m_commandPool != VK_NULL_HANDLE) vkDestroyCommandPool(device, m_commandPool, nullptr);
         for (auto framebuffer : m_swapchainFramebuffers) vkDestroyFramebuffer(device, framebuffer, nullptr);
-        
-        // Smart pointers automatically clean up pipeline, renderPass, swapchain, and context
     }
 
     void Renderer::initVulkan() {
@@ -46,7 +44,6 @@ namespace Engine::Graphics {
         m_swapchain = std::make_unique<Swapchain>(*m_vulkanContext, m_window);
         m_renderPass = std::make_unique<RenderPass>(*m_vulkanContext, m_swapchain->getImageFormat());
         
-        // Pipeline Routing Logic
         bool hwSupportsMesh = m_vulkanContext->getGpuSpecs().supportsMeshShaders;
         bool userWantsMesh = m_config.getBool("mesh_shaders", false);
 
@@ -221,7 +218,7 @@ namespace Engine::Graphics {
         ImGui::NewFrame();
     }
 
-    void Renderer::drawFrame() {
+    void Renderer::drawFrame(const glm::mat4& viewProj) {
         ImGui::Render();
         ImDrawData* drawData = ImGui::GetDrawData();
         VkDevice device = m_vulkanContext->getDevice();
@@ -254,20 +251,14 @@ namespace Engine::Graphics {
         renderPassInfo.renderArea.offset = {0, 0};
         renderPassInfo.renderArea.extent = m_swapchain->getExtent();
 
-        VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}}; // Solid Black
+        VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
         renderPassInfo.clearValueCount = 1;
         renderPassInfo.pClearValues = &clearColor;
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        // =========================================================================
-        // --- NEW: THE GRAPHICS PIPELINE INJECTION ---
-        // =========================================================================
-
-        // 1. Bind our HLSL Shader Pipeline to the GPU
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline->getHandle());
 
-        // 2. Dynamically set the Viewport (Scaling the image to the window size)
         VkViewport viewport{};
         viewport.x = 0.0f;
         viewport.y = 0.0f;
@@ -277,20 +268,24 @@ namespace Engine::Graphics {
         viewport.maxDepth = 1.0f;
         vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
-        // 3. Dynamically set the Scissor (Clipping area)
         VkRect2D scissor{};
         scissor.offset = {0, 0};
         scissor.extent = m_swapchain->getExtent();
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        // 4. DRAW CALL: Tell the GPU to execute our Vertex Shader 3 times (1 triangle)
+        // --- NEW: Push the Camera Matrix to the GPU ---
+        vkCmdPushConstants(
+            commandBuffer, 
+            m_graphicsPipeline->getLayout(), 
+            VK_SHADER_STAGE_VERTEX_BIT, 
+            0, 
+            sizeof(glm::mat4), 
+            &viewProj
+        );
+
         vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
-        // =========================================================================
-
-        // Render UI on top of the triangle
         ImGui_ImplVulkan_RenderDrawData(drawData, commandBuffer);
-        
         vkCmdEndRenderPass(commandBuffer);
         vkEndCommandBuffer(commandBuffer);
 
