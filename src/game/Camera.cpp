@@ -4,52 +4,49 @@
 
 namespace Engine::Game {
 
-    Camera::Camera() : m_position(0.0f, 0.0f, 0.0f), m_orientation(1.0f, 0.0f, 0.0f, 0.0f) {}
+    Camera::Camera() : m_position(0.0f), m_orientation(1.0f, 0.0f, 0.0f, 0.0f), m_pitch(0.0f), m_yaw(0.0f), m_roll(0.0f) {}
 
     void Camera::setInitialState(const glm::vec3& pos, const glm::vec3& eulerRot) {
         m_position = pos;
-        // Convert intuitive config Euler angles into the internal Quaternion
-        glm::vec3 rads(glm::radians(eulerRot.x), glm::radians(eulerRot.y), glm::radians(eulerRot.z));
-        m_orientation = glm::quat(rads);
+        m_pitch = eulerRot.x;
+        m_yaw = eulerRot.y;
+        m_roll = eulerRot.z;
     }
 
     void Camera::resetOrientation() {
-        m_orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        m_pitch = 0.0f;
+        m_yaw = 0.0f;
+        m_roll = 0.0f;
     }
 
     glm::vec3 Camera::getEulerAngles() const {
-        return glm::vec3(
-            glm::degrees(glm::pitch(m_orientation)),
-            glm::degrees(glm::yaw(m_orientation)),
-            glm::degrees(glm::roll(m_orientation))
-        );
+        return glm::vec3(m_pitch, m_yaw, m_roll);
     }
 
     void Camera::update(float dt, const glm::vec3& moveInput, const glm::vec3& lookInput, float rollInput) {
-        // 1. Convert internal Quaternion TO Euler for human-intuitive math
-        float pitch = glm::degrees(glm::pitch(m_orientation));
-        float yaw   = glm::degrees(glm::yaw(m_orientation));
-        float roll  = glm::degrees(glm::roll(m_orientation));
+        // 1. Update explicit Euler angles directly from user input
+        m_pitch -= lookInput.x;
+        m_yaw   -= lookInput.y;
+        m_roll  += rollInput * rollSpeed * dt;
 
-        // Apply delta inputs
-        pitch -= lookInput.x;
-        yaw   -= lookInput.y;
-        roll  += rollInput * rollSpeed * dt;
+        // 2. Clamp pitch to prevent the camera from doing backflips
+        m_pitch = std::clamp(m_pitch, -89.0f, 89.0f);
 
-        // 2. Clamp pitch to prevent the camera from flipping upside down
-        pitch = std::clamp(pitch, -89.0f, 89.0f);
+        // Keep yaw and roll within clean 360-degree bounds
+        if (m_yaw > 180.0f) m_yaw -= 360.0f;
+        if (m_yaw < -180.0f) m_yaw += 360.0f;
+        if (m_roll > 180.0f) m_roll -= 360.0f;
+        if (m_roll < -180.0f) m_roll += 360.0f;
 
-        // Keep yaw and roll within 360 bounds
-        if (yaw > 360.0f) yaw -= 360.0f;
-        if (yaw < -360.0f) yaw += 360.0f;
-        if (roll > 360.0f) roll -= 360.0f;
-        if (roll < -360.0f) roll += 360.0f;
+        // 3. Build a brand new, clean Quaternion from scratch every frame
+        // This guarantees NO gimbal lock and NO accidental roll induction
+        glm::quat qPitch = glm::angleAxis(glm::radians(m_pitch), glm::vec3(1.0f, 0.0f, 0.0f));
+        glm::quat qYaw   = glm::angleAxis(glm::radians(m_yaw),   glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::quat qRoll  = glm::angleAxis(glm::radians(m_roll),  glm::vec3(0.0f, 0.0f, 1.0f));
+        
+        m_orientation = qYaw * qPitch * qRoll;
 
-        // 3. Convert FROM Euler back to Quaternion for internal storage
-        glm::vec3 newEulerRads(glm::radians(pitch), glm::radians(yaw), glm::radians(roll));
-        m_orientation = glm::quat(newEulerRads);
-
-        // --- Apply Movement ---
+        // 4. Apply Movement
         glm::vec3 right   = m_orientation * glm::vec3(1.0f, 0.0f, 0.0f);
         glm::vec3 up      = m_orientation * glm::vec3(0.0f, 1.0f, 0.0f);
         glm::vec3 forward = m_orientation * glm::vec3(0.0f, 0.0f, -1.0f);
@@ -68,7 +65,9 @@ namespace Engine::Game {
 
         float aspect = aspectWidth / aspectHeight;
         glm::mat4 proj = glm::perspective(glm::radians(90.0f), aspect, 0.1f, 1000.0f);
-        proj[1][1] *= -1; // Vulkan Y-flip
+        
+        // Vulkan's Y-axis is inverted compared to OpenGL
+        proj[1][1] *= -1;
 
         return proj * view; 
     }

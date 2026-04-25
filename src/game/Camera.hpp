@@ -24,15 +24,18 @@ namespace Engine::Game {
         void resetOrientation();
 
         glm::vec3 getPosition() const { return m_position; }
-        
-        // Safely extracts Euler angles from the internal Quaternion for the UI
         glm::vec3 getEulerAngles() const;
 
     private:
         glm::vec3 m_position;
-        
-        // AAA Standard: Rotation is strictly stored in memory as a Quaternion
         glm::quat m_orientation; 
+        
+        // --- THE FIX: EXPLICIT EULER STORAGE ---
+        // By storing these as explicit numbers, Roll can NEVER change 
+        // unless you specifically trigger the rollInput variable.
+        float m_pitch;
+        float m_yaw;
+        float m_roll;
     };
 
 } // namespace Engine::Game
