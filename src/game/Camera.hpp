@@ -1,10 +1,6 @@
 #pragma once
 
-// --- THE FIX: VULKAN DEPTH CLIPPING ---
-// Forces GLM to use Vulkan's [0.0, 1.0] depth range instead of OpenGL's [-1.0, 1.0].
-// Without this, objects near the camera plane can clip out of existence!
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE 
-
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -24,10 +20,18 @@ namespace Engine::Game {
         float keyboardLookSensitivity = 90.0f;
         float rollSpeed = 60.0f;
 
-        void resetPosition();
+        void setInitialState(const glm::vec3& pos, const glm::vec3& eulerRot);
+        void resetOrientation();
+
+        glm::vec3 getPosition() const { return m_position; }
+        
+        // Safely extracts Euler angles from the internal Quaternion for the UI
+        glm::vec3 getEulerAngles() const;
 
     private:
         glm::vec3 m_position;
+        
+        // AAA Standard: Rotation is strictly stored in memory as a Quaternion
         glm::quat m_orientation; 
     };
 

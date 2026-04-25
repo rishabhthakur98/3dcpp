@@ -21,6 +21,18 @@ namespace Engine::Game {
         m_uiMeshShaders = m_config.getBool("mesh_shaders", false);
         m_uiSoftwareGI = m_config.getBool("software_gi", true);
         m_uiVRS = m_config.getBool("vrs", false);
+        
+        // Load intuitive culling flags
+        m_uiCullEnabled = m_config.getBool("cull_enabled", false);
+        m_uiCullMode = m_config.getInt("cull_mode", 0);
+        m_uiDevMode = m_config.getBool("dev_mode", true);
+
+        m_uiCamStartX = m_config.getFloat("cam_start_x", 0.0f);
+        m_uiCamStartY = m_config.getFloat("cam_start_y", 0.0f);
+        m_uiCamStartZ = m_config.getFloat("cam_start_z", 0.0f);
+        m_uiCamStartPitch = m_config.getFloat("cam_start_pitch", 0.0f);
+        m_uiCamStartYaw = m_config.getFloat("cam_start_yaw", 0.0f);
+        m_uiCamStartRoll = m_config.getFloat("cam_start_roll", 0.0f);
 
         m_camera.mouseSensitivity = m_config.getFloat("mouse_sensitivity", 0.1f);
         m_camera.keyboardLookSensitivity = m_config.getFloat("keyboard_look_sensitivity", 90.0f);
@@ -35,11 +47,11 @@ namespace Engine::Game {
         m_keybinds["Down (Descend)"] = m_config.getInt("key_down", GLFW_KEY_SPACE);
         m_keybinds["Roll CW"] = m_config.getInt("key_roll_cw", GLFW_KEY_E);
         m_keybinds["Roll CCW"] = m_config.getInt("key_roll_ccw", GLFW_KEY_Q);
-        
         m_keybinds["Look Up"] = m_config.getInt("key_pitch_up", GLFW_KEY_UP);
         m_keybinds["Look Down"] = m_config.getInt("key_pitch_down", GLFW_KEY_DOWN);
         m_keybinds["Look Left"] = m_config.getInt("key_yaw_left", GLFW_KEY_LEFT);
         m_keybinds["Look Right"] = m_config.getInt("key_yaw_right", GLFW_KEY_RIGHT);
+        m_keybinds["Reset Orientation"] = m_config.getInt("key_reset_orientation", GLFW_KEY_R);
     }
 
     bool GameManager::shouldQuit() const { return m_state == EngineState::QuitRequested; }
@@ -120,7 +132,6 @@ namespace Engine::Game {
         ImGui::Begin("MainMenu", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
         ImGui::Dummy(ImVec2(0.0f, 100.0f));
         ImGui::Indent(100.0f); 
-        
         ImGui::Text("=== 3D C++ ENGINE ===");
         ImGui::Dummy(ImVec2(0.0f, 30.0f));
 
@@ -181,8 +192,15 @@ namespace Engine::Game {
             if (ImGui::BeginTabItem("Display")) {
                 ImGui::Dummy(ImVec2(0.0f, 10.0f));
                 ImGui::Checkbox("Fullscreen Mode", &m_uiFullscreen);
-                const char* resolutions[] = { "7680x4320 (8K)", "3840x2160 (4K)", "2560x1440 (2K)", "1920x1080 (FHD)", "1366x768 (HD)", "1280x720 (720p)" };
+                
+                const char* resolutions[] = { 
+                    "7680x4320 (8K)", "3840x2160 (4K)", "2560x1440 (1440p)", 
+                    "1920x1080 (1080p)", "1600x900 (900p)", "1366x768 (768p)", 
+                    "1280x720 (720p)", "854x480 (480p)", "640x360 (360p)", 
+                    "426x240 (240p)", "256x144 (144p)" 
+                };
                 ImGui::Combo("Resolution", &m_uiResolutionIndex, resolutions, IM_ARRAYSIZE(resolutions));
+                
                 ImGui::Dummy(ImVec2(0.0f, 10.0f));
                 ImGui::Separator();
                 ImGui::Dummy(ImVec2(0.0f, 10.0f));
@@ -211,7 +229,7 @@ namespace Engine::Game {
                 std::vector<std::string> bindOrder = {
                     "Forward", "Backward", "Left", "Right", 
                     "Up (Ascend)", "Down (Descend)", "Roll CW", "Roll CCW",
-                    "Look Up", "Look Down", "Look Left", "Look Right"
+                    "Look Up", "Look Down", "Look Left", "Look Right", "Reset Orientation"
                 };
 
                 for (const auto& action : bindOrder) {
@@ -219,23 +237,11 @@ namespace Engine::Game {
                     ImGui::SameLine(180.0f);
                     
                     std::string btnLabel = (m_actionWaitingForKey == action) ? "[ PRESS ANY KEY ]" : "[ " + getKeyName(m_keybinds[action]) + " ]";
-                    
-                    // --- THE FIX: State Snapshot ---
-                    // By saving the state to a local boolean before the button is drawn,
-                    // we guarantee the push and pop match perfectly even if the button changes the state!
                     bool isCurrentlyWaiting = (m_actionWaitingForKey == action);
                     
-                    if (isCurrentlyWaiting) {
-                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
-                    }
-                    
-                    if (ImGui::Button((btnLabel + "##" + action).c_str(), ImVec2(150, 0))) {
-                        m_actionWaitingForKey = action;
-                    }
-                    
-                    if (isCurrentlyWaiting) {
-                        ImGui::PopStyleColor();
-                    }
+                    if (isCurrentlyWaiting) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+                    if (ImGui::Button((btnLabel + "##" + action).c_str(), ImVec2(150, 0))) m_actionWaitingForKey = action;
+                    if (isCurrentlyWaiting) ImGui::PopStyleColor();
                 }
 
                 ImGui::EndTabItem();
@@ -243,9 +249,6 @@ namespace Engine::Game {
 
             if (ImGui::BeginTabItem("AAA Pipeline")) {
                 ImGui::Dummy(ImVec2(0.0f, 10.0f));
-                ImGui::TextWrapped("These cutting-edge features require specific GPU architecture support.");
-                ImGui::Dummy(ImVec2(0.0f, 10.0f));
-
                 const auto& specs = m_renderer.getGpuSpecs();
                 
                 if (!specs.supportsHwRayTracing) { ImGui::BeginDisabled(); m_uiHwRaytracing = false; }
@@ -262,6 +265,41 @@ namespace Engine::Game {
                 if (!specs.supportsVRS) { ImGui::BeginDisabled(); m_uiVRS = false; }
                 ImGui::Checkbox("Variable Rate Shading", &m_uiVRS);
                 if (!specs.supportsVRS) { ImGui::EndDisabled(); ImGui::SameLine(); ImGui::TextColored(ImVec4(1,0.4,0.4,1), "(Unsupported)"); }
+
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Developer")) {
+                ImGui::Dummy(ImVec2(0.0f, 10.0f));
+                ImGui::Checkbox("Enable Developer Mode (Overlay)", &m_uiDevMode);
+                
+                ImGui::Dummy(ImVec2(0.0f, 10.0f));
+                ImGui::Separator();
+                ImGui::Dummy(ImVec2(0.0f, 10.0f));
+
+                // --- NEW: INTUITIVE CULLING UI ---
+                ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Rasterizer Settings (Requires Rebuild):");
+                ImGui::Checkbox("Enable Culling", &m_uiCullEnabled);
+                
+                if (!m_uiCullEnabled) ImGui::BeginDisabled();
+                const char* cullModes[] = { "Back Face", "Front Face" };
+                ImGui::Combo("Cull Mode", &m_uiCullMode, cullModes, IM_ARRAYSIZE(cullModes));
+                if (!m_uiCullEnabled) ImGui::EndDisabled();
+
+                ImGui::Dummy(ImVec2(0.0f, 10.0f));
+                ImGui::Separator();
+                ImGui::Dummy(ImVec2(0.0f, 10.0f));
+
+                ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Initial Level Camera State:");
+                float startPos[3] = { m_uiCamStartX, m_uiCamStartY, m_uiCamStartZ };
+                if (ImGui::InputFloat3("Start Pos (X,Y,Z)", startPos)) {
+                    m_uiCamStartX = startPos[0]; m_uiCamStartY = startPos[1]; m_uiCamStartZ = startPos[2];
+                }
+                
+                float startRot[3] = { m_uiCamStartPitch, m_uiCamStartYaw, m_uiCamStartRoll };
+                if (ImGui::InputFloat3("Start Rot (P,Y,R)", startRot)) {
+                    m_uiCamStartPitch = startRot[0]; m_uiCamStartYaw = startRot[1]; m_uiCamStartRoll = startRot[2];
+                }
 
                 ImGui::EndTabItem();
             }
@@ -295,12 +333,26 @@ namespace Engine::Game {
             m_config.setInt("key_pitch_down", m_keybinds["Look Down"]);
             m_config.setInt("key_yaw_left", m_keybinds["Look Left"]);
             m_config.setInt("key_yaw_right", m_keybinds["Look Right"]);
+            m_config.setInt("key_reset_orientation", m_keybinds["Reset Orientation"]);
 
             m_config.setBool("hw_raytracing", m_uiHwRaytracing);
             m_config.setBool("mesh_shaders", m_uiMeshShaders);
             m_config.setBool("software_gi", m_uiSoftwareGI);
             m_config.setBool("vrs", m_uiVRS);
+            
+            m_config.setBool("dev_mode", m_uiDevMode);
+            m_config.setBool("cull_enabled", m_uiCullEnabled);
+            m_config.setInt("cull_mode", m_uiCullMode);
+            
+            m_config.setFloat("cam_start_x", m_uiCamStartX);
+            m_config.setFloat("cam_start_y", m_uiCamStartY);
+            m_config.setFloat("cam_start_z", m_uiCamStartZ);
+            m_config.setFloat("cam_start_pitch", m_uiCamStartPitch);
+            m_config.setFloat("cam_start_yaw", m_uiCamStartYaw);
+            m_config.setFloat("cam_start_roll", m_uiCamStartRoll);
+
             m_config.save();
+            m_renderer.rebuildGraphicsPipeline();
             
             int winWidth = 1920, winHeight = 1080;
             switch(m_uiResolutionIndex) {
@@ -308,8 +360,13 @@ namespace Engine::Game {
                 case 1: winWidth = 3840; winHeight = 2160; break; 
                 case 2: winWidth = 2560; winHeight = 1440; break; 
                 case 3: winWidth = 1920; winHeight = 1080; break; 
-                case 4: winWidth = 1366; winHeight = 768;  break; 
-                case 5: winWidth = 1280; winHeight = 720;  break; 
+                case 4: winWidth = 1600; winHeight = 900;  break; 
+                case 5: winWidth = 1366; winHeight = 768;  break; 
+                case 6: winWidth = 1280; winHeight = 720;  break; 
+                case 7: winWidth = 854;  winHeight = 480;  break; 
+                case 8: winWidth = 640;  winHeight = 360;  break; 
+                case 9: winWidth = 426;  winHeight = 240;  break; 
+                case 10: winWidth = 256; winHeight = 144;  break; 
             }
             m_window.applyDisplaySettings(m_uiFullscreen, winWidth, winHeight);
             m_state = EngineState::MainMenu;
@@ -333,11 +390,12 @@ namespace Engine::Game {
         
         try {
             m_activeEntities = m_sceneLoader.loadScene(filepath);
-            for (const auto& entity : m_activeEntities) {
-                m_modelLoader.loadModel(entity.modelPath);
-            }
+            for (const auto& entity : m_activeEntities) m_modelLoader.loadModel(entity.modelPath);
             
-            m_camera.resetPosition();
+            glm::vec3 startPos(m_uiCamStartX, m_uiCamStartY, m_uiCamStartZ);
+            glm::vec3 startRot(m_uiCamStartPitch, m_uiCamStartYaw, m_uiCamStartRoll);
+            m_camera.setInitialState(startPos, startRot);
+            
             m_state = EngineState::Playing;
 
             glfwSetInputMode(m_window.getNativeWindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -383,6 +441,8 @@ namespace Engine::Game {
         if (glfwGetKey(win, m_keybinds["Up (Ascend)"]) == GLFW_PRESS) move.y += 1.0f; 
         if (glfwGetKey(win, m_keybinds["Down (Descend)"]) == GLFW_PRESS) move.y -= 1.0f; 
 
+        if (glfwGetKey(win, m_keybinds["Reset Orientation"]) == GLFW_PRESS) m_camera.resetOrientation();
+
         glm::vec3 look(deltaY, deltaX, 0.0f);
         m_camera.update(dt, move, look, roll);
 
@@ -390,6 +450,20 @@ namespace Engine::Game {
         ImGui::Begin("Overlay", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysAutoResize);
         ImGui::TextColored(ImVec4(0,1,0,1), "GAMEPLAY ACTIVE (6DOF Camera)");
         ImGui::Text("Entities in RAM: %zu", m_activeEntities.size());
+        
+        if (m_uiDevMode) {
+            ImGui::Dummy(ImVec2(0.0f, 5.0f));
+            ImGui::TextColored(ImVec4(1,1,0,1), "--- DEVELOPER MODE ---");
+            ImGui::Text("FPS: %.1f (Expected Target: %d)", ImGui::GetIO().Framerate, m_uiTargetFps);
+            
+            glm::vec3 pos = m_camera.getPosition();
+            glm::vec3 rot = m_camera.getEulerAngles();
+            
+            ImGui::Text("Camera Pos: [ X: %.2f,  Y: %.2f,  Z: %.2f ]", pos.x, pos.y, pos.z);
+            ImGui::Text("Camera Rot: [ P: %.2f,  Y: %.2f,  R: %.2f ]", rot.x, rot.y, rot.z);
+        }
+
+        ImGui::Dummy(ImVec2(0.0f, 5.0f));
         ImGui::Text("Press ESCAPE to pause");
         ImGui::End();
 

@@ -8,9 +8,9 @@
 
 namespace Engine::Graphics {
 
-    GraphicsPipeline::GraphicsPipeline(VulkanContext& context, VkRenderPass renderPass, PipelineType type)
-        : m_context(context), m_type(type), m_pipeline(VK_NULL_HANDLE), 
-          m_pipelineLayout(VK_NULL_HANDLE), m_descriptorSetLayout(VK_NULL_HANDLE) {
+    GraphicsPipeline::GraphicsPipeline(VulkanContext& context, VkRenderPass renderPass, PipelineType type, bool cullEnabled, int cullMode)
+        : m_context(context), m_type(type), m_cullEnabled(cullEnabled), m_cullMode(cullMode), 
+          m_pipeline(VK_NULL_HANDLE), m_pipelineLayout(VK_NULL_HANDLE), m_descriptorSetLayout(VK_NULL_HANDLE) {
         
         createDescriptorSetLayout();
         createPipelineLayout();
@@ -22,7 +22,6 @@ namespace Engine::Graphics {
         if (m_pipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, m_pipeline, nullptr);
         if (m_pipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(device, m_pipelineLayout, nullptr);
         if (m_descriptorSetLayout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
-        std::cout << "Graphics Pipeline destroyed safely.\n";
     }
 
     VkShaderModule GraphicsPipeline::createShaderModule(const unsigned char* code, size_t size) {
@@ -69,16 +68,8 @@ namespace Engine::Graphics {
     void GraphicsPipeline::createPipelineLayout() {
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        
-        // =====================================================================
-        // --- THE STRICT DRIVER FIX ---
-        // =====================================================================
-        // Since we have not yet allocated a VkDescriptorSet for our 3D models, 
-        // we must explicitly tell the GPU to expect ZERO sets. If we leave this at 1,
-        // Intel drivers will silently abort the vkCmdDraw call!
         pipelineLayoutInfo.setLayoutCount = 0;
         pipelineLayoutInfo.pSetLayouts = nullptr;
-        // =====================================================================
 
         VkPushConstantRange pushConstantRange{};
         pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
@@ -99,7 +90,6 @@ namespace Engine::Graphics {
         VkShaderModule fragShaderModule = VK_NULL_HANDLE;
 
         if (m_type == PipelineType::Traditional) {
-            std::cout << "[Pipeline Router] Assembling Fallback TRADITIONAL Pipeline...\n";
             vertShaderModule = createShaderModule(traditional_vert_spv, traditional_vert_spv_len);
             fragShaderModule = createShaderModule(traditional_frag_spv, traditional_frag_spv_len);
 
@@ -118,7 +108,6 @@ namespace Engine::Graphics {
             shaderStages.push_back(vertShaderStageInfo);
             shaderStages.push_back(fragShaderStageInfo);
         } else {
-            std::cout << "[Pipeline Router] Assembling Cutting-Edge MESHLET Pipeline...\n";
             throw std::runtime_error("Meshlet pipeline shaders not yet implemented!");
         }
 
@@ -143,8 +132,16 @@ namespace Engine::Graphics {
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL; 
         rasterizer.lineWidth = 1.0f;
-        rasterizer.cullMode = VK_CULL_MODE_NONE;   
-        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        
+        // --- NEW: INTUITIVE CULLING LOGIC ---
+        if (!m_cullEnabled) {
+            rasterizer.cullMode = VK_CULL_MODE_NONE;
+        } else {
+            rasterizer.cullMode = (m_cullMode == 0) ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_FRONT_BIT;
+        }
+        
+        // Lock the front face to Counter-Clockwise to respect the glTF AAA standard!
+        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         rasterizer.depthBiasEnable = VK_FALSE;
 
         VkPipelineMultisampleStateCreateInfo multisampling{};
@@ -189,8 +186,6 @@ namespace Engine::Graphics {
         if (vkCreateGraphicsPipelines(m_context.getDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_pipeline) != VK_SUCCESS) {
             throw std::runtime_error("Critical Error: Failed to create Graphics Pipeline!");
         }
-
-        std::cout << "Graphics Pipeline successfully assembled from embedded HLSL shaders.\n";
 
         vkDestroyShaderModule(m_context.getDevice(), vertShaderModule, nullptr);
         vkDestroyShaderModule(m_context.getDevice(), fragShaderModule, nullptr);

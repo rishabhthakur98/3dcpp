@@ -18,9 +18,11 @@ namespace Engine::Graphics {
         ~Renderer();
 
         void beginUI();
-        // Updated to accept the Push Constant data
         void drawFrame(const glm::mat4& viewProj);
         void uploadDataToSSBO(const std::vector<float>& data);
+
+        // --- NEW: Allows GameManager to force a rebuild when settings change ---
+        void rebuildGraphicsPipeline();
 
         const GpuSpecs& getGpuSpecs() const { return m_vulkanContext->getGpuSpecs(); }
 

@@ -42,11 +42,10 @@ namespace Engine::Game {
         double m_lastMouseX, m_lastMouseY;
         bool m_firstMouse;
 
-        // --- NEW: Keybinding System ---
         std::unordered_map<std::string, int> m_keybinds;
-        std::string m_actionWaitingForKey; // Tracks if the UI is waiting for the user to press a key
+        std::string m_actionWaitingForKey; 
         std::string getKeyName(int key) const;
-        void processKeybindCapture(); // Intercepts keyboard input when rebinding
+        void processKeybindCapture(); 
 
         bool m_uiFullscreen;
         int m_uiResolutionIndex;
@@ -58,6 +57,15 @@ namespace Engine::Game {
         bool m_uiMeshShaders; 
         bool m_uiSoftwareGI;  
         bool m_uiVRS;         
+
+        bool m_uiDevMode;
+        
+        // --- NEW: Intuitive UI Culling Variables ---
+        bool m_uiCullEnabled;
+        int m_uiCullMode; 
+        
+        float m_uiCamStartX, m_uiCamStartY, m_uiCamStartZ;
+        float m_uiCamStartPitch, m_uiCamStartYaw, m_uiCamStartRoll;
 
         void handleMainMenu();
         void handleWorldSelect();

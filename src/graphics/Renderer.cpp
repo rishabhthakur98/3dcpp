@@ -44,21 +44,34 @@ namespace Engine::Graphics {
         m_swapchain = std::make_unique<Swapchain>(*m_vulkanContext, m_window);
         m_renderPass = std::make_unique<RenderPass>(*m_vulkanContext, m_swapchain->getImageFormat());
         
-        bool hwSupportsMesh = m_vulkanContext->getGpuSpecs().supportsMeshShaders;
-        bool userWantsMesh = m_config.getBool("mesh_shaders", false);
-
-        PipelineType typeToBuild = PipelineType::Traditional;
-        if (hwSupportsMesh && userWantsMesh) {
-            typeToBuild = PipelineType::Meshlet;
-        }
-
-        m_graphicsPipeline = std::make_unique<GraphicsPipeline>(*m_vulkanContext, m_renderPass->getHandle(), typeToBuild);
+        rebuildGraphicsPipeline();
 
         createFramebuffers();
         createCommandPool();
         createCommandBuffers();
         createSyncObjects();
         createImGuiDescriptorPool();
+    }
+
+    void Renderer::rebuildGraphicsPipeline() {
+        if (m_vulkanContext->getDevice() != VK_NULL_HANDLE) {
+            vkDeviceWaitIdle(m_vulkanContext->getDevice());
+        }
+
+        bool hwSupportsMesh = m_vulkanContext->getGpuSpecs().supportsMeshShaders;
+        bool userWantsMesh = m_config.getBool("mesh_shaders", false);
+        
+        // Grab the simplified UI variables
+        bool cullEnabled = m_config.getBool("cull_enabled", false);
+        int cullMode = m_config.getInt("cull_mode", 0);
+
+        PipelineType typeToBuild = (hwSupportsMesh && userWantsMesh) ? PipelineType::Meshlet : PipelineType::Traditional;
+
+        m_graphicsPipeline.reset();
+        // Inject them into the pipeline router
+        m_graphicsPipeline = std::make_unique<GraphicsPipeline>(*m_vulkanContext, m_renderPass->getHandle(), typeToBuild, cullEnabled, cullMode);
+        
+        std::cout << "[Vulkan] Graphics Pipeline rebuilt with current configurations.\n";
     }
 
     void Renderer::recreateSwapchain() {
@@ -273,7 +286,6 @@ namespace Engine::Graphics {
         scissor.extent = m_swapchain->getExtent();
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        // --- NEW: Push the Camera Matrix to the GPU ---
         vkCmdPushConstants(
             commandBuffer, 
             m_graphicsPipeline->getLayout(), 

@@ -11,7 +11,8 @@ namespace Engine::Graphics {
 
     class GraphicsPipeline {
     public:
-        GraphicsPipeline(VulkanContext& context, VkRenderPass renderPass, PipelineType type);
+        // Changed boolean face order to an intuitive int cullMode (0=Back, 1=Front)
+        GraphicsPipeline(VulkanContext& context, VkRenderPass renderPass, PipelineType type, bool cullEnabled, int cullMode);
         ~GraphicsPipeline();
 
         GraphicsPipeline(const GraphicsPipeline&) = delete;
@@ -26,6 +27,9 @@ namespace Engine::Graphics {
     private:
         VulkanContext& m_context;
         PipelineType m_type;
+        
+        bool m_cullEnabled;
+        int m_cullMode;
 
         VkPipeline m_pipeline;
         VkPipelineLayout m_pipelineLayout;
@@ -35,7 +39,6 @@ namespace Engine::Graphics {
         void createPipelineLayout();
         void createPipeline(VkRenderPass renderPass);
         
-        // --- NEW: Helper to convert embedded byte arrays into Vulkan Shader Modules ---
         VkShaderModule createShaderModule(const unsigned char* code, size_t size);
     };
 
