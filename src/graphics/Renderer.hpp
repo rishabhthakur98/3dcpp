@@ -6,6 +6,9 @@
 #include "Swapchain.hpp"
 #include "RenderPass.hpp"
 #include "GraphicsPipeline.hpp"
+#include "ModelLoader.hpp"
+#include "../scene/SceneLoader.hpp"
+
 #include <vector>
 #include <memory>
 #include <glm/glm.hpp>
@@ -18,11 +21,18 @@ namespace Engine::Graphics {
         ~Renderer();
 
         void beginUI();
-        void drawFrame(const glm::mat4& viewProj);
-        void uploadDataToSSBO(const std::vector<float>& data);
-
-        // --- NEW: Allows GameManager to force a rebuild when settings change ---
+        
+        // Now dynamically draws all entities passed to it!
+        void drawFrame(const glm::mat4& viewProj, const std::vector<Scene::SceneEntity>& activeEntities, ModelLoader& modelLoader);
+        
+        // --- VRAM Management ---
+        void uploadModel(std::shared_ptr<Model> model);
+        void freeUploadedModels(); // Cleans the GPU to prevent memory leaks!
+        
         void rebuildGraphicsPipeline();
+
+        // Restored missing SSBO placeholder declaration
+        void uploadDataToSSBO(const std::vector<float>& data);
 
         const GpuSpecs& getGpuSpecs() const { return m_vulkanContext->getGpuSpecs(); }
 
@@ -35,6 +45,8 @@ namespace Engine::Graphics {
         std::unique_ptr<RenderPass> m_renderPass;
         std::unique_ptr<GraphicsPipeline> m_graphicsPipeline;
         
+        std::vector<std::shared_ptr<Model>> m_uploadedModels;
+
         std::vector<VkFramebuffer> m_swapchainFramebuffers;
         VkCommandPool m_commandPool;
         std::vector<VkCommandBuffer> m_commandBuffers;
@@ -55,8 +67,16 @@ namespace Engine::Graphics {
         void createImGuiDescriptorPool();
         void recreateSwapchain();
 
-        void loadEmbeddedShaders();
+        // GPU Buffer Helpers
+        void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, VkBuffer& buffer, VmaAllocation& allocation);
+        void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+        VkCommandBuffer beginSingleTimeCommands();
+        void endSingleTimeCommands(VkCommandBuffer commandBuffer);
+
         void initImGui();
+        
+        // Restored missing compute shader placeholder declaration
+        void loadEmbeddedShaders();
     };
 
 } // namespace Engine::Graphics

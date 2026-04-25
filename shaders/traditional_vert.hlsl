@@ -1,32 +1,35 @@
+// --- DYNAMIC VERTEX INJECTION ---
+struct VSInput {
+    [[vk::location(0)]] float3 Position : POSITION;
+    [[vk::location(1)]] float3 Normal   : NORMAL;
+    [[vk::location(2)]] float2 UV       : TEXCOORD;
+    [[vk::location(3)]] float4 Color    : COLOR0;
+    [[vk::location(4)]] float4 Tangent  : TANGENT;
+};
+
 struct VSOutput {
     float4 Pos : SV_POSITION;
     float3 Color : COLOR;
 };
 
-[[vk::push_constant]]
+// We expanded the fast block to hold BOTH the Camera and the Object's location!
 struct PushConstants {
     float4x4 viewProj;
-} pc;
+    float4x4 model;
+};
+[[vk::push_constant]] PushConstants pc;
 
-VSOutput main(uint VertexIndex : SV_VertexID) {
+VSOutput main(VSInput input) {
     VSOutput output;
     
-    float3 localPos = float3(0.0, 0.0, 0.0);
+    // 1. Move the raw vertex to its designated location in the world
+    float4 worldPos = mul(pc.model, float4(input.Position, 1.0));
     
-    // Ordered CCW to match glTF and AAA engine standards
-    if (VertexIndex == 0) { 
-        localPos = float3(0.0, -1.0, -1.5);  // Top
-        output.Color = float3(1.0, 0.0, 0.0);      
-    }
-    else if (VertexIndex == 1) { 
-        localPos = float3(-1.0, 1.0, -1.5);  // Bottom Left
-        output.Color = float3(0.0, 0.0, 1.0);      
-    }
-    else { 
-        localPos = float3(1.0, 1.0, -1.5);   // Bottom Right
-        output.Color = float3(0.0, 1.0, 0.0);      
-    }
+    // 2. Project it onto the camera lens
+    output.Pos = mul(pc.viewProj, worldPos);
     
-    output.Pos = mul(pc.viewProj, float4(localPos, 1.0));
+    // 3. For now, we will draw the Normal vectors as colors so you can see beautiful 3D shading!
+    output.Color = input.Normal * 0.5 + 0.5;
+    
     return output;
 }

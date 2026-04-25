@@ -1,4 +1,5 @@
 #include "GraphicsPipeline.hpp"
+#include "Vertex.hpp" // Ensure we know what a Vertex is
 #include <stdexcept>
 #include <iostream>
 
@@ -12,6 +13,7 @@ namespace Engine::Graphics {
         : m_context(context), m_type(type), m_cullEnabled(cullEnabled), m_cullMode(cullMode), 
           m_pipeline(VK_NULL_HANDLE), m_pipelineLayout(VK_NULL_HANDLE), m_descriptorSetLayout(VK_NULL_HANDLE) {
         
+        // Build the layout and the physical pipeline state machine
         createDescriptorSetLayout();
         createPipelineLayout();
         createPipeline(renderPass);
@@ -19,6 +21,7 @@ namespace Engine::Graphics {
 
     GraphicsPipeline::~GraphicsPipeline() {
         VkDevice device = m_context.getDevice();
+        // Safely destroy Vulkan objects when the pipeline is swapped or the engine closes
         if (m_pipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, m_pipeline, nullptr);
         if (m_pipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(device, m_pipelineLayout, nullptr);
         if (m_descriptorSetLayout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
@@ -38,6 +41,7 @@ namespace Engine::Graphics {
     }
 
     void GraphicsPipeline::createDescriptorSetLayout() {
+        // Setup for future bindless SSBO architecture
         VkDescriptorSetLayoutBinding ssboBinding{};
         ssboBinding.binding = 0; 
         ssboBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -68,13 +72,18 @@ namespace Engine::Graphics {
     void GraphicsPipeline::createPipelineLayout() {
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        
+        // Explicitly 0 layouts right now to appease strict Intel drivers
         pipelineLayoutInfo.setLayoutCount = 0;
         pipelineLayoutInfo.pSetLayouts = nullptr;
 
         VkPushConstantRange pushConstantRange{};
         pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         pushConstantRange.offset = 0;
-        pushConstantRange.size = sizeof(glm::mat4);
+        
+        // Allocate enough fast register memory for BOTH the Camera Matrix (64 bytes) 
+        // AND the Entity Model Matrix (64 bytes). Total = 128 bytes.
+        pushConstantRange.size = sizeof(glm::mat4) * 2;
 
         pipelineLayoutInfo.pushConstantRangeCount = 1; 
         pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
@@ -111,11 +120,18 @@ namespace Engine::Graphics {
             throw std::runtime_error("Meshlet pipeline shaders not yet implemented!");
         }
 
+        // --- NEW: Tell the GPU how to read our C++ Vertex memory ---
+        auto bindingDescription = Vertex::getBindingDescription();
+        auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
         VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
         vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertexInputInfo.vertexBindingDescriptionCount = 0;
-        vertexInputInfo.vertexAttributeDescriptionCount = 0;
+        vertexInputInfo.vertexBindingDescriptionCount = 1;
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+        vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
+        // Tells the GPU we are drawing Triangles, not lines or points
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -133,17 +149,18 @@ namespace Engine::Graphics {
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL; 
         rasterizer.lineWidth = 1.0f;
         
-        // --- NEW: INTUITIVE CULLING LOGIC ---
+        // --- DYNAMIC CULLING INJECTION ---
         if (!m_cullEnabled) {
             rasterizer.cullMode = VK_CULL_MODE_NONE;
         } else {
             rasterizer.cullMode = (m_cullMode == 0) ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_FRONT_BIT;
         }
         
-        // Lock the front face to Counter-Clockwise to respect the glTF AAA standard!
+        // glTF models strictly use Counter-Clockwise winding order for front faces
         rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         rasterizer.depthBiasEnable = VK_FALSE;
 
+        // No MSAA yet, deferred pipelines handle antialiasing differently
         VkPipelineMultisampleStateCreateInfo multisampling{};
         multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
         multisampling.sampleShadingEnable = VK_FALSE;
@@ -159,6 +176,7 @@ namespace Engine::Graphics {
         colorBlending.attachmentCount = 1;
         colorBlending.pAttachments = &colorBlendAttachment;
 
+        // Allows us to resize the window without destroying the entire pipeline
         std::vector<VkDynamicState> dynamicStates = {
             VK_DYNAMIC_STATE_VIEWPORT,
             VK_DYNAMIC_STATE_SCISSOR
@@ -168,6 +186,7 @@ namespace Engine::Graphics {
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
         dynamicState.pDynamicStates = dynamicStates.data();
 
+        // Assemble the final pipeline structure
         VkGraphicsPipelineCreateInfo pipelineInfo{};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
         pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
@@ -187,6 +206,7 @@ namespace Engine::Graphics {
             throw std::runtime_error("Critical Error: Failed to create Graphics Pipeline!");
         }
 
+        // Shaders are baked into the pipeline now, we can free their temp modules
         vkDestroyShaderModule(m_context.getDevice(), vertShaderModule, nullptr);
         vkDestroyShaderModule(m_context.getDevice(), fragShaderModule, nullptr);
     }
