@@ -2,7 +2,7 @@
 #include "core/Config.hpp"
 #include "graphics/Renderer.hpp"
 #include "graphics/ModelLoader.hpp"
-#include "game/GameManager.hpp"
+#include "game/GameManager.hpp" // Note: GameManager automatically pulls in the new Input and Scene modules
 
 #include <iostream>
 #include <cstdlib>
@@ -21,7 +21,6 @@ int main() {
         bool isFullscreen = config.getBool("fullscreen", false);
         int resIndex = config.getInt("resolution_index", 3);
         
-        // --- EXTENDED RESOLUTIONS ---
         int winWidth = 1920, winHeight = 1080;
         switch(resIndex) {
             case 0: winWidth = 7680; winHeight = 4320; break; 

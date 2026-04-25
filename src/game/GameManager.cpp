@@ -1,15 +1,13 @@
 #include "GameManager.hpp"
 #include <iostream>
 #include <filesystem>
-#include <cctype>
 #include <imgui.h> 
 
 namespace Engine::Game {
 
     GameManager::GameManager(Core::Window& window, Core::Config& config, Graphics::Renderer& renderer, Graphics::ModelLoader& modelLoader)
         : m_window(window), m_config(config), m_renderer(renderer), m_modelLoader(modelLoader), 
-          m_state(EngineState::MainMenu), m_menuIndex(0), m_escapePressed(false),
-          m_firstMouse(true), m_actionWaitingForKey("") {
+          m_inputManager(window, config), m_state(EngineState::MainMenu), m_menuIndex(0) {
         
         m_uiFullscreen = m_config.getBool("fullscreen", false);
         m_uiResolutionIndex = m_config.getInt("resolution_index", 3); 
@@ -22,7 +20,6 @@ namespace Engine::Game {
         m_uiSoftwareGI = m_config.getBool("software_gi", true);
         m_uiVRS = m_config.getBool("vrs", false);
         
-        // Load intuitive culling flags
         m_uiCullEnabled = m_config.getBool("cull_enabled", false);
         m_uiCullMode = m_config.getInt("cull_mode", 0);
         m_uiDevMode = m_config.getBool("dev_mode", true);
@@ -38,71 +35,14 @@ namespace Engine::Game {
         m_camera.keyboardLookSensitivity = m_config.getFloat("keyboard_look_sensitivity", 90.0f);
         m_camera.moveSpeed = m_config.getFloat("move_speed", 5.0f);
         m_camera.rollSpeed = m_config.getFloat("roll_speed", 60.0f);
-
-        m_keybinds["Forward"] = m_config.getInt("key_forward", GLFW_KEY_W);
-        m_keybinds["Backward"] = m_config.getInt("key_backward", GLFW_KEY_S);
-        m_keybinds["Left"] = m_config.getInt("key_left", GLFW_KEY_A);
-        m_keybinds["Right"] = m_config.getInt("key_right", GLFW_KEY_D);
-        m_keybinds["Up (Ascend)"] = m_config.getInt("key_up", GLFW_KEY_LEFT_SHIFT);
-        m_keybinds["Down (Descend)"] = m_config.getInt("key_down", GLFW_KEY_SPACE);
-        m_keybinds["Roll CW"] = m_config.getInt("key_roll_cw", GLFW_KEY_E);
-        m_keybinds["Roll CCW"] = m_config.getInt("key_roll_ccw", GLFW_KEY_Q);
-        m_keybinds["Look Up"] = m_config.getInt("key_pitch_up", GLFW_KEY_UP);
-        m_keybinds["Look Down"] = m_config.getInt("key_pitch_down", GLFW_KEY_DOWN);
-        m_keybinds["Look Left"] = m_config.getInt("key_yaw_left", GLFW_KEY_LEFT);
-        m_keybinds["Look Right"] = m_config.getInt("key_yaw_right", GLFW_KEY_RIGHT);
-        m_keybinds["Reset Orientation"] = m_config.getInt("key_reset_orientation", GLFW_KEY_R);
     }
 
     bool GameManager::shouldQuit() const { return m_state == EngineState::QuitRequested; }
 
-    std::string GameManager::getKeyName(int key) const {
-        const char* name = glfwGetKeyName(key, 0);
-        if (name) {
-            std::string str(name);
-            for (auto& c : str) c = static_cast<char>(toupper(c));
-            return str;
-        }
-        switch(key) {
-            case GLFW_KEY_SPACE: return "SPACE";
-            case GLFW_KEY_LEFT_SHIFT: return "L_SHIFT";
-            case GLFW_KEY_RIGHT_SHIFT: return "R_SHIFT";
-            case GLFW_KEY_LEFT_CONTROL: return "L_CTRL";
-            case GLFW_KEY_UP: return "UP_ARROW";
-            case GLFW_KEY_DOWN: return "DOWN_ARROW";
-            case GLFW_KEY_LEFT: return "LEFT_ARROW";
-            case GLFW_KEY_RIGHT: return "RIGHT_ARROW";
-            default: return "KEY_" + std::to_string(key);
-        }
-    }
-
-    void GameManager::processKeybindCapture() {
-        if (m_actionWaitingForKey.empty()) return;
-
-        for (int key = GLFW_KEY_SPACE; key <= GLFW_KEY_LAST; ++key) {
-            if (glfwGetKey(m_window.getNativeWindow(), key) == GLFW_PRESS) {
-                if (key != GLFW_KEY_ESCAPE) { 
-                    m_keybinds[m_actionWaitingForKey] = key;
-                }
-                m_actionWaitingForKey = ""; 
-                break;
-            }
-        }
-    }
-
-    void GameManager::pollInput() {
-        GLFWwindow* rawWindow = m_window.getNativeWindow();
-        bool escape = (glfwGetKey(rawWindow, GLFW_KEY_ESCAPE) == GLFW_PRESS);
-        static bool lastEscape = false;
-        m_escapePressed = escape && !lastEscape;
-        lastEscape = escape;
-    }
-
     void GameManager::update(float dt) {
-        pollInput();
-
-        if (!m_actionWaitingForKey.empty()) {
-            processKeybindCapture();
+        // Delegate key rebinding interception to the InputManager
+        if (!m_inputManager.actionWaitingForKey.empty()) {
+            m_inputManager.processKeybindCapture();
         }
 
         bool stylesPushed = false;
@@ -175,7 +115,7 @@ namespace Engine::Game {
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
 
-        if (ImGui::Button("Back", ImVec2(150, 40)) || m_escapePressed) m_state = EngineState::MainMenu; 
+        if (ImGui::Button("Back", ImVec2(150, 40)) || m_inputManager.wasEscapeJustPressed()) m_state = EngineState::MainMenu; 
 
         ImGui::End();
     }
@@ -236,11 +176,11 @@ namespace Engine::Game {
                     ImGui::Text("%s:", action.c_str());
                     ImGui::SameLine(180.0f);
                     
-                    std::string btnLabel = (m_actionWaitingForKey == action) ? "[ PRESS ANY KEY ]" : "[ " + getKeyName(m_keybinds[action]) + " ]";
-                    bool isCurrentlyWaiting = (m_actionWaitingForKey == action);
+                    std::string btnLabel = (m_inputManager.actionWaitingForKey == action) ? "[ PRESS ANY KEY ]" : "[ " + m_inputManager.getKeyName(m_inputManager.keybinds[action]) + " ]";
+                    bool isCurrentlyWaiting = (m_inputManager.actionWaitingForKey == action);
                     
                     if (isCurrentlyWaiting) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
-                    if (ImGui::Button((btnLabel + "##" + action).c_str(), ImVec2(150, 0))) m_actionWaitingForKey = action;
+                    if (ImGui::Button((btnLabel + "##" + action).c_str(), ImVec2(150, 0))) m_inputManager.actionWaitingForKey = action;
                     if (isCurrentlyWaiting) ImGui::PopStyleColor();
                 }
 
@@ -277,7 +217,6 @@ namespace Engine::Game {
                 ImGui::Separator();
                 ImGui::Dummy(ImVec2(0.0f, 10.0f));
 
-                // --- NEW: INTUITIVE CULLING UI ---
                 ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Rasterizer Settings (Requires Rebuild):");
                 ImGui::Checkbox("Enable Culling", &m_uiCullEnabled);
                 
@@ -321,19 +260,8 @@ namespace Engine::Game {
             m_config.setFloat("move_speed", m_camera.moveSpeed);
             m_config.setFloat("roll_speed", m_camera.rollSpeed);
 
-            m_config.setInt("key_forward", m_keybinds["Forward"]);
-            m_config.setInt("key_backward", m_keybinds["Backward"]);
-            m_config.setInt("key_left", m_keybinds["Left"]);
-            m_config.setInt("key_right", m_keybinds["Right"]);
-            m_config.setInt("key_up", m_keybinds["Up (Ascend)"]);
-            m_config.setInt("key_down", m_keybinds["Down (Descend)"]);
-            m_config.setInt("key_roll_cw", m_keybinds["Roll CW"]);
-            m_config.setInt("key_roll_ccw", m_keybinds["Roll CCW"]);
-            m_config.setInt("key_pitch_up", m_keybinds["Look Up"]);
-            m_config.setInt("key_pitch_down", m_keybinds["Look Down"]);
-            m_config.setInt("key_yaw_left", m_keybinds["Look Left"]);
-            m_config.setInt("key_yaw_right", m_keybinds["Look Right"]);
-            m_config.setInt("key_reset_orientation", m_keybinds["Reset Orientation"]);
+            // Delegate to InputManager
+            m_inputManager.saveBindsToConfig(m_config);
 
             m_config.setBool("hw_raytracing", m_uiHwRaytracing);
             m_config.setBool("mesh_shaders", m_uiMeshShaders);
@@ -373,9 +301,9 @@ namespace Engine::Game {
         }
         
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(150, 40)) || m_escapePressed) {
+        if (ImGui::Button("Cancel", ImVec2(150, 40)) || m_inputManager.wasEscapeJustPressed()) {
             m_state = EngineState::MainMenu;
-            m_actionWaitingForKey = ""; 
+            m_inputManager.actionWaitingForKey = ""; 
         }
 
         ImGui::End();
@@ -397,9 +325,7 @@ namespace Engine::Game {
             m_camera.setInitialState(startPos, startRot);
             
             m_state = EngineState::Playing;
-
-            glfwSetInputMode(m_window.getNativeWindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            m_firstMouse = true;
+            m_inputManager.setMouseCapture(true);
 
         } catch (const std::exception& e) {
             std::cerr << "[Warning]: " << e.what() << "\n";
@@ -408,40 +334,29 @@ namespace Engine::Game {
     }
 
     void GameManager::handlePlaying(float dt) {
-        GLFWwindow* win = m_window.getNativeWindow();
-
-        double mouseX, mouseY;
-        glfwGetCursorPos(win, &mouseX, &mouseY);
+        // --- NEW: CLEAN DELEGATED INPUT MAPPING ---
+        glm::vec2 mouseDelta = m_inputManager.getMouseDelta();
+        float deltaX = mouseDelta.x * m_camera.mouseSensitivity;
+        float deltaY = mouseDelta.y * m_camera.mouseSensitivity;
         
-        if (m_firstMouse) {
-            m_lastMouseX = mouseX;
-            m_lastMouseY = mouseY;
-            m_firstMouse = false;
-        }
-
-        float deltaX = static_cast<float>(mouseX - m_lastMouseX) * m_camera.mouseSensitivity;
-        float deltaY = static_cast<float>(mouseY - m_lastMouseY) * m_camera.mouseSensitivity;
-        m_lastMouseX = mouseX;
-        m_lastMouseY = mouseY;
-        
-        if (glfwGetKey(win, m_keybinds["Look Left"]) == GLFW_PRESS)  deltaX -= m_camera.keyboardLookSensitivity * dt;
-        if (glfwGetKey(win, m_keybinds["Look Right"]) == GLFW_PRESS) deltaX += m_camera.keyboardLookSensitivity * dt;
-        if (glfwGetKey(win, m_keybinds["Look Up"]) == GLFW_PRESS)    deltaY -= m_camera.keyboardLookSensitivity * dt;
-        if (glfwGetKey(win, m_keybinds["Look Down"]) == GLFW_PRESS)  deltaY += m_camera.keyboardLookSensitivity * dt;
+        if (m_inputManager.isActionPressed("Look Left"))  deltaX -= m_camera.keyboardLookSensitivity * dt;
+        if (m_inputManager.isActionPressed("Look Right")) deltaX += m_camera.keyboardLookSensitivity * dt;
+        if (m_inputManager.isActionPressed("Look Up"))    deltaY -= m_camera.keyboardLookSensitivity * dt;
+        if (m_inputManager.isActionPressed("Look Down"))  deltaY += m_camera.keyboardLookSensitivity * dt;
 
         float roll = 0.0f;
-        if (glfwGetKey(win, m_keybinds["Roll CW"]) == GLFW_PRESS) roll += 1.0f; 
-        if (glfwGetKey(win, m_keybinds["Roll CCW"]) == GLFW_PRESS) roll -= 1.0f; 
+        if (m_inputManager.isActionPressed("Roll CW")) roll += 1.0f; 
+        if (m_inputManager.isActionPressed("Roll CCW")) roll -= 1.0f; 
 
         glm::vec3 move(0.0f);
-        if (glfwGetKey(win, m_keybinds["Forward"]) == GLFW_PRESS) move.z += 1.0f; 
-        if (glfwGetKey(win, m_keybinds["Backward"]) == GLFW_PRESS) move.z -= 1.0f; 
-        if (glfwGetKey(win, m_keybinds["Left"]) == GLFW_PRESS) move.x -= 1.0f; 
-        if (glfwGetKey(win, m_keybinds["Right"]) == GLFW_PRESS) move.x += 1.0f; 
-        if (glfwGetKey(win, m_keybinds["Up (Ascend)"]) == GLFW_PRESS) move.y += 1.0f; 
-        if (glfwGetKey(win, m_keybinds["Down (Descend)"]) == GLFW_PRESS) move.y -= 1.0f; 
+        if (m_inputManager.isActionPressed("Forward")) move.z += 1.0f; 
+        if (m_inputManager.isActionPressed("Backward")) move.z -= 1.0f; 
+        if (m_inputManager.isActionPressed("Left")) move.x -= 1.0f; 
+        if (m_inputManager.isActionPressed("Right")) move.x += 1.0f; 
+        if (m_inputManager.isActionPressed("Up (Ascend)")) move.y += 1.0f; 
+        if (m_inputManager.isActionPressed("Down (Descend)")) move.y -= 1.0f; 
 
-        if (glfwGetKey(win, m_keybinds["Reset Orientation"]) == GLFW_PRESS) m_camera.resetOrientation();
+        if (m_inputManager.isActionPressed("Reset Orientation")) m_camera.resetOrientation();
 
         glm::vec3 look(deltaY, deltaX, 0.0f);
         m_camera.update(dt, move, look, roll);
@@ -458,7 +373,6 @@ namespace Engine::Game {
             
             glm::vec3 pos = m_camera.getPosition();
             glm::vec3 rot = m_camera.getEulerAngles();
-            
             ImGui::Text("Camera Pos: [ X: %.2f,  Y: %.2f,  Z: %.2f ]", pos.x, pos.y, pos.z);
             ImGui::Text("Camera Rot: [ P: %.2f,  Y: %.2f,  R: %.2f ]", rot.x, rot.y, rot.z);
         }
@@ -467,9 +381,9 @@ namespace Engine::Game {
         ImGui::Text("Press ESCAPE to pause");
         ImGui::End();
 
-        if (m_escapePressed) {
+        if (m_inputManager.wasEscapeJustPressed()) {
             m_state = EngineState::MainMenu;
-            glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            m_inputManager.setMouseCapture(false);
         }
     }
 

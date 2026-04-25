@@ -4,11 +4,11 @@
 #include "../core/Config.hpp"
 #include "../graphics/Renderer.hpp"
 #include "../graphics/ModelLoader.hpp"
-#include "SceneLoader.hpp"
+#include "../scene/SceneLoader.hpp"
+#include "../input/InputManager.hpp"
 #include "Camera.hpp"
 #include <string>
 #include <vector>
-#include <unordered_map>
 
 namespace Engine::Game {
 
@@ -30,23 +30,18 @@ namespace Engine::Game {
         Core::Config& m_config;
         Graphics::Renderer& m_renderer;
         Graphics::ModelLoader& m_modelLoader;
-        SceneLoader m_sceneLoader; 
-        Camera m_camera;
         
-        std::vector<SceneEntity> m_activeEntities; 
+        // --- NEW: Delegated Sub-Systems ---
+        Scene::SceneLoader m_sceneLoader; 
+        Input::InputManager m_inputManager;
+        
+        Camera m_camera;
+        std::vector<Scene::SceneEntity> m_activeEntities; 
 
         EngineState m_state;
         int m_menuIndex;
-        bool m_escapePressed;
-        
-        double m_lastMouseX, m_lastMouseY;
-        bool m_firstMouse;
 
-        std::unordered_map<std::string, int> m_keybinds;
-        std::string m_actionWaitingForKey; 
-        std::string getKeyName(int key) const;
-        void processKeybindCapture(); 
-
+        // UI State Variables
         bool m_uiFullscreen;
         int m_uiResolutionIndex;
         bool m_uiLimitFrames;
@@ -59,8 +54,6 @@ namespace Engine::Game {
         bool m_uiVRS;         
 
         bool m_uiDevMode;
-        
-        // --- NEW: Intuitive UI Culling Variables ---
         bool m_uiCullEnabled;
         int m_uiCullMode; 
         
@@ -73,7 +66,6 @@ namespace Engine::Game {
         void handlePlaying(float dt); 
         
         void loadWorld(const std::string& worldName);
-        void pollInput();
     };
 
 } // namespace Engine::Game
