@@ -1,0 +1,14 @@
+# World 01 Scene Blueprint
+# Format: model path, position(x,y,z), rotation(pitch,yaw,roll), scale(x,y,z)
+
+[Entity]
+model = assets/models/hq_base.glb
+position = 0.0, 0.0, 0.0
+rotation = 0.0, 0.0, 0.0
+scale = 1.0, 1.0, 1.0
+
+[Entity]
+model = assets/models/crate.glb
+position = 15.5, 0.0, -5.0
+rotation = 0.0, 45.0, 0.0
+scale = 2.0, 2.0, 2.0

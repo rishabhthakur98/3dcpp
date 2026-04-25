@@ -1,43 +1,43 @@
 #pragma once
 
-// GLFW handles window creation and OS-level input events.
-// We define GLFW_INCLUDE_VULKAN before including glfw3.h so it automatically 
-// includes the Vulkan headers we need.
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-
 #include <string>
-#include <stdexcept>
 
 namespace Engine::Core {
 
-    // A class to encapsulate the OS window and input handling.
     class Window {
     public:
-        // Initialize the window with a specific width, height, and title.
-        Window(int width, int height, const std::string& title);
-        
-        // Destructor ensures resources are cleaned up properly when the window closes.
+        Window(int width, int height, bool fullscreen, const std::string& title);
         ~Window();
 
-        // Prevent copying of the window object to avoid double-freeing GLFW resources.
         Window(const Window&) = delete;
         Window& operator=(const Window&) = delete;
 
-        // Check if the user has requested the window to close (e.g., clicking the 'X').
         bool shouldClose() const;
-
-        // Process OS events (keyboard, mouse, window resizing).
         void pollEvents();
+        void closeWindow();
 
-        // Get the raw GLFW window pointer for Vulkan surface creation later.
+        // --- NEW: Live Window Management ---
+        void applyDisplaySettings(bool fullscreen, int width, int height);
+        
+        bool wasResized() const { return m_framebufferResized; }
+        void resetResizedFlag() { m_framebufferResized = false; }
+
         GLFWwindow* getNativeWindow() const { return m_window; }
+        int getWidth() const { return m_width; }
+        int getHeight() const { return m_height; }
 
     private:
         GLFWwindow* m_window;
         int m_width;
         int m_height;
+        bool m_isFullscreen;
+        bool m_framebufferResized = false;
         std::string m_title;
+
+        // Static callback so GLFW can tell us when the user resizes the window
+        static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
     };
 
 } // namespace Engine::Core

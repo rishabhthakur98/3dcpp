@@ -1,62 +1,44 @@
-# Prerequisites
-*.d
+# ==========================================
+# 3DCPP ENGINE GITIGNORE
+# ==========================================
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# debug information files
-*.dwo
-
-
-# CMake and build artifacts
+# --- CMake and Build Artifacts ---
+# Ignore the build directory so we don't commit compiled binaries and caches
 build/
 .cache/
 compile_commands.json
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
 
-# Compiled binaries and generated shader headers
+# --- Compiled Binaries & Intermediates ---
+# Ignore raw executables and object files
 *.exe
 *.o
 *.a
 *.so
+*.out
+*.app
+
+# --- Shader Artifacts ---
+# Ignore compiled SPIR-V binaries and generated headers 
+# (These are generated automatically during the CMake build process)
 *.spv
 *_spv.h
 
-# VS Code / IDE settings
+# --- IDE Settings ---
+# Ignore local editor configurations
 .vscode/
 .idea/
+*.suo
+*.sln
+*.user
 
-# Vendor tools (You might want to keep libraries, but ignore massive tool binaries if using Git LFS)
-# tools/dxc/
+# ==========================================
+# NOTE ON VENDOR AND TOOLS:
+# We explicitly DO NOT ignore the `vendor/` or `tools/` directories here.
+# This ensures all your external C++ libraries (GLFW, ImGui, Jolt, cgltf, VMA) 
+# and the local DXC compiler are successfully pushed to Git.
+# Anyone who clones this repo can build it instantly without downloading dependencies!
+# ==========================================

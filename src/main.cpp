@@ -1,34 +1,74 @@
 #include "core/Window.hpp"
+#include "core/Config.hpp"
 #include "graphics/Renderer.hpp"
+#include "graphics/ModelLoader.hpp"
+#include "game/GameManager.hpp"
+
 #include <iostream>
+#include <cstdlib>
+#include <chrono>
+#include <thread>
+#include <filesystem> 
 
 int main() {
     try {
-        // 1. Initialize the Window (800x600 resolution)
-        Engine::Core::Window window(800, 600, "3D C++ Engine (Vulkan + HLSL)");
+        if (std::filesystem::exists("../engine.cfg")) {
+            std::filesystem::current_path("..");
+        }
 
-        // 2. Initialize the Graphics API (Vulkan)
-        Engine::Graphics::Renderer renderer(window);
+        Engine::Core::Config config("engine.cfg");
+        
+        bool isFullscreen = config.getBool("fullscreen", false);
+        int resIndex = config.getInt("resolution_index", 3);
+        
+        int winWidth = 1920, winHeight = 1080;
+        switch(resIndex) {
+            case 0: winWidth = 7680; winHeight = 4320; break; 
+            case 1: winWidth = 3840; winHeight = 2160; break; 
+            case 2: winWidth = 2560; winHeight = 1440; break; 
+            case 3: winWidth = 1920; winHeight = 1080; break; 
+            case 4: winWidth = 1366; winHeight = 768;  break; 
+            case 5: winWidth = 1280; winHeight = 720;  break; 
+        }
 
-        // 3. Main Game Loop
-        std::cout << "Entering main loop...\n";
-        while (!window.shouldClose()) {
+        Engine::Core::Window window(winWidth, winHeight, isFullscreen, "3D C++ Engine (AAA Bindless)");
+        
+        // --- THE FIX: Pass config into the Renderer ---
+        Engine::Graphics::Renderer renderer(window, config);
+        Engine::Graphics::ModelLoader modelLoader;
+        
+        Engine::Game::GameManager gameManager(window, config, renderer, modelLoader);
+
+        while (!window.shouldClose() && !gameManager.shouldQuit()) {
             
-            // Process OS input and window events
+            auto frameStart = std::chrono::high_resolution_clock::now();
             window.pollEvents();
 
-            // Run Physics simulation step here (Jolt Physics / Fluid updates)
-            // physicsSystem.step();
-
-            // Render the visual frame
+            renderer.beginUI();
+            gameManager.update();
             renderer.drawFrame();
+
+            if (config.getBool("limit_frames", true)) {
+                int targetFps = config.getInt("target_fps", 60);
+                std::chrono::duration<double, std::milli> targetFrameTime(1000.0 / targetFps);
+                
+                auto frameEnd = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double, std::milli> timeTaken = frameEnd - frameStart;
+                
+                if (timeTaken < targetFrameTime) {
+                    std::this_thread::sleep_for(targetFrameTime - timeTaken);
+                }
+            }
         }
 
     } catch (const std::exception& e) {
-        // Catch any setup errors (e.g., Vulkan missing, window creation failing)
-        std::cerr << "Engine Fatal Error: " << e.what() << '\n';
+        std::cerr << "\n[Engine Fatal Error]: " << e.what() << '\n';
+        return EXIT_FAILURE;
+    } catch (...) {
+        std::cerr << "\n[Engine Fatal Error]: An unknown error occurred.\n";
         return EXIT_FAILURE;
     }
 
+    std::cout << "Engine shutting down safely.\n";
     return EXIT_SUCCESS;
 }
