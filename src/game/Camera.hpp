@@ -19,6 +19,11 @@ namespace Engine::Game {
         float mouseSensitivity = 0.1f;
         float keyboardLookSensitivity = 90.0f;
         float rollSpeed = 60.0f;
+        
+        // --- NEW: Camera Lens Parameters ---
+        float fov = 60.0f;
+        float nearPlane = 0.1f;
+        float farPlane = 1000.0f;
 
         void setInitialState(const glm::vec3& pos, const glm::vec3& eulerRot);
         void resetOrientation();
@@ -30,9 +35,6 @@ namespace Engine::Game {
         glm::vec3 m_position;
         glm::quat m_orientation; 
         
-        // --- THE FIX: EXPLICIT EULER STORAGE ---
-        // By storing these as explicit numbers, Roll can NEVER change 
-        // unless you specifically trigger the rollInput variable.
         float m_pitch;
         float m_yaw;
         float m_roll;

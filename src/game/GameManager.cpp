@@ -12,6 +12,11 @@ namespace Engine::Game {
         m_camera.keyboardLookSensitivity = m_config.getFloat("keyboard_look_sensitivity", 90.0f);
         m_camera.moveSpeed = m_config.getFloat("move_speed", 5.0f);
         m_camera.rollSpeed = m_config.getFloat("roll_speed", 60.0f);
+        
+        // Load FOV parameters directly into the camera on boot!
+        m_camera.fov = m_config.getFloat("cam_fov", 60.0f);
+        m_camera.nearPlane = m_config.getFloat("cam_near", 0.1f);
+        m_camera.farPlane = m_config.getFloat("cam_far", 1000.0f);
     }
 
     bool GameManager::shouldQuit() const { return m_state == EngineState::QuitRequested; }

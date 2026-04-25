@@ -1,31 +1,28 @@
 #include "Renderer.hpp"
-#include "compute_spv.h"
 #include <iostream>
 #include <stdexcept>
-#include <cstring> // Required for memcpy of VMA buffers
+#include <array>
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
-#include <glm/gtc/matrix_transform.hpp> // Required for 3D world matrix math
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace Engine::Graphics {
 
     Renderer::Renderer(Core::Window& window, Core::Config& config) 
         : m_window(window), m_config(config) {
         initVulkan();
-        loadEmbeddedShaders();
         initImGui(); 
     }
 
     Renderer::~Renderer() {
         std::cout << "Cleaning up Vulkan and UI resources gracefully...\n";
         VkDevice device = m_vulkanContext->getDevice();
-        
-        // Wait for the GPU to finish all drawing before we pull the memory out from under it
         vkDeviceWaitIdle(device);
 
-        freeUploadedModels(); // Free our dedicated VRAM model buffers
+        // Tell the buffer manager to nuke the memory
+        m_bufferManager.reset();
 
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplGlfw_Shutdown();
@@ -39,8 +36,8 @@ namespace Engine::Graphics {
             vkDestroyFence(device, m_inFlightFences[i], nullptr);
         }
 
-        if (m_commandPool != VK_NULL_HANDLE) vkDestroyCommandPool(device, m_commandPool, nullptr);
         for (auto framebuffer : m_swapchainFramebuffers) vkDestroyFramebuffer(device, framebuffer, nullptr);
+        if (m_commandPool != VK_NULL_HANDLE) vkDestroyCommandPool(device, m_commandPool, nullptr);
     }
 
     void Renderer::initVulkan() {
@@ -48,20 +45,23 @@ namespace Engine::Graphics {
         
         m_vulkanContext = std::make_unique<VulkanContext>(m_window);
         m_swapchain = std::make_unique<Swapchain>(*m_vulkanContext, m_window);
-        m_renderPass = std::make_unique<RenderPass>(*m_vulkanContext, m_swapchain->getImageFormat());
         
-        // Build the initial pipeline using the current config settings
-        rebuildGraphicsPipeline();
-
-        createFramebuffers();
+        // Pass both formats to the RenderPass
+        m_renderPass = std::make_unique<RenderPass>(*m_vulkanContext, m_swapchain->getImageFormat(), m_swapchain->getDepthFormat());
+        
         createCommandPool();
+        
+        // Initialize our new Memory subsystem
+        m_bufferManager = std::make_unique<VulkanBufferManager>(*m_vulkanContext, m_commandPool);
+
+        rebuildGraphicsPipeline();
+        createFramebuffers();
         createCommandBuffers();
         createSyncObjects();
         createImGuiDescriptorPool();
     }
 
     void Renderer::rebuildGraphicsPipeline() {
-        // Pause the GPU. We cannot destroy a pipeline while it's actively drawing!
         if (m_vulkanContext->getDevice() != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(m_vulkanContext->getDevice());
         }
@@ -69,13 +69,11 @@ namespace Engine::Graphics {
         bool hwSupportsMesh = m_vulkanContext->getGpuSpecs().supportsMeshShaders;
         bool userWantsMesh = m_config.getBool("mesh_shaders", false);
         
-        // Read dynamic rasterization settings from the config
         bool cullEnabled = m_config.getBool("cull_enabled", false);
         int cullMode = m_config.getInt("cull_mode", 0);
 
         PipelineType typeToBuild = (hwSupportsMesh && userWantsMesh) ? PipelineType::Meshlet : PipelineType::Traditional;
 
-        // Destroy the old pipeline via unique_ptr reset, then dynamically build the new one
         m_graphicsPipeline.reset();
         m_graphicsPipeline = std::make_unique<GraphicsPipeline>(*m_vulkanContext, m_renderPass->getHandle(), typeToBuild, cullEnabled, cullMode);
         
@@ -85,8 +83,6 @@ namespace Engine::Graphics {
     void Renderer::recreateSwapchain() {
         int width = 0, height = 0;
         glfwGetFramebufferSize(m_window.getNativeWindow(), &width, &height);
-        
-        // If the window is minimized, pause the thread until it's restored
         while (width == 0 || height == 0) {
             glfwGetFramebufferSize(m_window.getNativeWindow(), &width, &height);
             glfwWaitEvents();
@@ -111,12 +107,17 @@ namespace Engine::Graphics {
         m_swapchainFramebuffers.resize(imageViews.size());
 
         for (size_t i = 0; i < imageViews.size(); i++) {
-            VkImageView attachments[] = { imageViews[i] };
+            // Attach both the Color Image View and the Depth Image View
+            std::array<VkImageView, 2> attachments = {
+                imageViews[i],
+                m_swapchain->getDepthImageView()
+            };
+
             VkFramebufferCreateInfo framebufferInfo{};
             framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
             framebufferInfo.renderPass = m_renderPass->getHandle();
-            framebufferInfo.attachmentCount = 1;
-            framebufferInfo.pAttachments = attachments;
+            framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+            framebufferInfo.pAttachments = attachments.data();
             framebufferInfo.width = extent.width;
             framebufferInfo.height = extent.height;
             framebufferInfo.layers = 1;
@@ -215,7 +216,6 @@ namespace Engine::Graphics {
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO(); (void)io;
         
-        // Prevent ImGui from constantly cluttering the project folder with an unused settings file
         io.IniFilename = nullptr; 
         
         ImGui_ImplGlfw_InitForVulkan(m_window.getNativeWindow(), true);
@@ -233,148 +233,17 @@ namespace Engine::Graphics {
         ImGui_ImplVulkan_Init(&init_info);
     }
 
-    void Renderer::loadEmbeddedShaders() {
-        std::cout << "Loaded embedded compute shader. Size: " << compute_spv_len << " bytes.\n";
-    }
-
-    void Renderer::uploadDataToSSBO(const std::vector<float>& data) {}
-
-    // --- VMA BUFFER HELPERS ---
-    VkCommandBuffer Renderer::beginSingleTimeCommands() {
-        VkCommandBufferAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandPool = m_commandPool;
-        allocInfo.commandBufferCount = 1;
-
-        VkCommandBuffer commandBuffer;
-        vkAllocateCommandBuffers(m_vulkanContext->getDevice(), &allocInfo, &commandBuffer);
-
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        // Optimization: Tell the GPU this command buffer is only submitted once and then thrown away
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        
-        vkBeginCommandBuffer(commandBuffer, &beginInfo);
-        return commandBuffer;
-    }
-
-    void Renderer::endSingleTimeCommands(VkCommandBuffer commandBuffer) {
-        vkEndCommandBuffer(commandBuffer);
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &commandBuffer;
-
-        vkQueueSubmit(m_vulkanContext->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
-        
-        // Wait for the memory transfer to physically finish on the GPU bus before continuing
-        vkQueueWaitIdle(m_vulkanContext->getGraphicsQueue());
-
-        vkFreeCommandBuffers(m_vulkanContext->getDevice(), m_commandPool, 1, &commandBuffer);
-    }
-
-    void Renderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, VkBuffer& buffer, VmaAllocation& allocation) {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = size;
-        bufferInfo.usage = usage;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = memoryUsage;
-
-        if (vmaCreateBuffer(m_vulkanContext->getAllocator(), &bufferInfo, &allocInfo, &buffer, &allocation, nullptr) != VK_SUCCESS) {
-            throw std::runtime_error("Critical Error: Failed to create VMA buffer!");
-        }
-    }
-
-    void Renderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
-        VkCommandBuffer commandBuffer = beginSingleTimeCommands();
-        VkBufferCopy copyRegion{};
-        copyRegion.size = size;
-        vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-        endSingleTimeCommands(commandBuffer);
-    }
-
-    // --- MAIN VRAM UPLOAD FUNCTION ---
-    void Renderer::uploadModel(std::shared_ptr<Model> model) {
-        if (model->isUploaded) return; // Prevent double uploading
-
-        for (auto& mesh : model->meshes) {
-            // 1. UPLOAD VERTICES
-            VkDeviceSize bufferSize = sizeof(Vertex) * mesh.vertices.size();
-            
-            VkBuffer stagingBuffer;
-            VmaAllocation stagingAlloc;
-            
-            // Create CPU-visible RAM staging area
-            createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY, stagingBuffer, stagingAlloc);
-
-            // Copy data from the C++ vector into the Staging Area
-            void* data;
-            vmaMapMemory(m_vulkanContext->getAllocator(), stagingAlloc, &data);
-            memcpy(data, mesh.vertices.data(), (size_t)bufferSize);
-            vmaUnmapMemory(m_vulkanContext->getAllocator(), stagingAlloc);
-
-            // Create ultra-fast GPU VRAM buffer
-            createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY, mesh.vertexBuffer, mesh.vertexAllocation);
-            
-            // Command the GPU to pull the data from the Staging Area into VRAM
-            copyBuffer(stagingBuffer, mesh.vertexBuffer, bufferSize);
-            
-            // Delete the CPU staging area to save RAM
-            vmaDestroyBuffer(m_vulkanContext->getAllocator(), stagingBuffer, stagingAlloc);
-
-            // 2. UPLOAD INDICES (If they exist)
-            if (!mesh.indices.empty()) {
-                bufferSize = sizeof(uint32_t) * mesh.indices.size();
-                createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY, stagingBuffer, stagingAlloc);
-                
-                vmaMapMemory(m_vulkanContext->getAllocator(), stagingAlloc, &data);
-                memcpy(data, mesh.indices.data(), (size_t)bufferSize);
-                vmaUnmapMemory(m_vulkanContext->getAllocator(), stagingAlloc);
-
-                createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY, mesh.indexBuffer, mesh.indexAllocation);
-                copyBuffer(stagingBuffer, mesh.indexBuffer, bufferSize);
-                vmaDestroyBuffer(m_vulkanContext->getAllocator(), stagingBuffer, stagingAlloc);
-            }
-            mesh.isUploaded = true;
-        }
-        model->isUploaded = true;
-        m_uploadedModels.push_back(model); 
-    }
-
-    void Renderer::freeUploadedModels() {
-        for (auto& model : m_uploadedModels) {
-            for (auto& mesh : model->meshes) {
-                // Return the memory to the Vulkan Memory Allocator pool
-                if (mesh.vertexBuffer) vmaDestroyBuffer(m_vulkanContext->getAllocator(), mesh.vertexBuffer, mesh.vertexAllocation);
-                if (mesh.indexBuffer) vmaDestroyBuffer(m_vulkanContext->getAllocator(), mesh.indexBuffer, mesh.indexAllocation);
-                mesh.vertexBuffer = VK_NULL_HANDLE;
-                mesh.indexBuffer = VK_NULL_HANDLE;
-                mesh.isUploaded = false;
-            }
-            model->isUploaded = false;
-        }
-        m_uploadedModels.clear();
-        std::cout << "[Vulkan] Freed all physical VRAM buffers for models.\n";
-    }
-
     void Renderer::beginUI() {
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
     }
 
-    // --- MAIN DRAW LOOP ---
     void Renderer::drawFrame(const glm::mat4& viewProj, const std::vector<Scene::SceneEntity>& activeEntities, ModelLoader& modelLoader) {
         ImGui::Render();
         ImDrawData* drawData = ImGui::GetDrawData();
         VkDevice device = m_vulkanContext->getDevice();
 
-        // Wait until the GPU is finished with this specific frame buffer
         vkWaitForFences(device, 1, &m_inFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
 
         uint32_t imageIndex;
@@ -403,10 +272,20 @@ namespace Engine::Graphics {
         renderPassInfo.renderArea.offset = {0, 0};
         renderPassInfo.renderArea.extent = m_swapchain->getExtent();
 
-        // Clear the screen to pure black
+        // =========================================================================
+        // --- THE FIX: C++11 STRICT COMPLIANT UNION ASSIGNMENT ---
+        // By instantiating the specific clear structs first, we bypass the 
+        // braced initializer bug in strict GCC compilers.
+        // =========================================================================
         VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
-        renderPassInfo.clearValueCount = 1;
-        renderPassInfo.pClearValues = &clearColor;
+        VkClearValue clearDepth = {};
+        clearDepth.depthStencil = {1.0f, 0};
+
+        std::array<VkClearValue, 2> clearValues = { clearColor, clearDepth };
+
+        renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+        renderPassInfo.pClearValues = clearValues.data();
+        // =========================================================================
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -426,25 +305,19 @@ namespace Engine::Graphics {
         scissor.extent = m_swapchain->getExtent();
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        // =========================================================================
-        // --- BINDLESS ENTITY DRAWING LOOP ---
-        // =========================================================================
         for (const auto& entity : activeEntities) {
             if (!entity.props.visible) continue;
 
             auto model = modelLoader.loadModel(entity.modelPath);
             if (!model || !model->isUploaded) continue;
 
-            // 1. Compute the Model Matrix using the specific Entity's level data
             glm::mat4 modelMatrix = glm::mat4(1.0f);
             modelMatrix = glm::translate(modelMatrix, entity.transform.position);
-            // Apply rotations in standard Euler order (Yaw, Pitch, Roll)
             modelMatrix = glm::rotate(modelMatrix, glm::radians(entity.transform.rotation.y), glm::vec3(0, 1, 0));
             modelMatrix = glm::rotate(modelMatrix, glm::radians(entity.transform.rotation.x), glm::vec3(1, 0, 0));
             modelMatrix = glm::rotate(modelMatrix, glm::radians(entity.transform.rotation.z), glm::vec3(0, 0, 1));
             modelMatrix = glm::scale(modelMatrix, entity.transform.scale);
 
-            // 2. Load the Push Constants structure that exactly matches the HLSL
             struct PushConstants {
                 glm::mat4 viewProj;
                 glm::mat4 model;
@@ -452,32 +325,25 @@ namespace Engine::Graphics {
             pc.viewProj = viewProj;
             pc.model = modelMatrix;
 
-            // Instantly push 128 bytes into the fast GPU registers
             vkCmdPushConstants(commandBuffer, m_graphicsPipeline->getLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
 
-            // 3. Issue the draw calls for every sub-mesh in the model
             for (const auto& mesh : model->meshes) {
                 if (!mesh.isUploaded) continue;
 
-                // Bind the VRAM buffer containing the points
                 VkBuffer vertexBuffers[] = { mesh.vertexBuffer };
                 VkDeviceSize offsets[] = { 0 };
                 vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
                 
-                // If it has an index buffer, use it to draw highly optimized triangles
                 if (mesh.indexBuffer != VK_NULL_HANDLE) {
                     vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
                     vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(mesh.indices.size()), 1, 0, 0, 0);
                 } else {
-                    // Fallback: Just draw the raw vertices sequentially
                     vkCmdDraw(commandBuffer, static_cast<uint32_t>(mesh.vertices.size()), 1, 0, 0);
                 }
             }
         }
 
-        // Draw ImGui over the top of the 3D scene
         ImGui_ImplVulkan_RenderDrawData(drawData, commandBuffer);
-        
         vkCmdEndRenderPass(commandBuffer);
         vkEndCommandBuffer(commandBuffer);
 

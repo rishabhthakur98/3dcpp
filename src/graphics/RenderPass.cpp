@@ -1,68 +1,75 @@
 #include "RenderPass.hpp"
 #include <stdexcept>
 #include <iostream>
+#include <array>
 
 namespace Engine::Graphics {
 
-    RenderPass::RenderPass(VulkanContext& context, VkFormat swapchainImageFormat)
+    RenderPass::RenderPass(VulkanContext& context, VkFormat swapchainImageFormat, VkFormat depthFormat)
         : m_context(context), m_renderPass(VK_NULL_HANDLE) {
-        createRenderPass(swapchainImageFormat);
+        createRenderPass(swapchainImageFormat, depthFormat);
     }
 
     RenderPass::~RenderPass() {
-        if (m_renderPass != VK_NULL_HANDLE) {
-            vkDestroyRenderPass(m_context.getDevice(), m_renderPass, nullptr);
-        }
-        std::cout << "Render Pass destroyed safely.\n";
+        if (m_renderPass != VK_NULL_HANDLE) vkDestroyRenderPass(m_context.getDevice(), m_renderPass, nullptr);
     }
 
-    void RenderPass::createRenderPass(VkFormat format) {
-        // 1. Define the Color Attachment (Our Swapchain Image)
+    void RenderPass::createRenderPass(VkFormat colorFormat, VkFormat depthFormat) {
+        // 1. Color Attachment
         VkAttachmentDescription colorAttachment{};
-        colorAttachment.format = format;
-        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT; // No multisampling yet
-        
-        // Clear the screen to a solid color before drawing a new frame
+        colorAttachment.format = colorFormat;
+        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
         colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; 
-        
-        // Save the rendered pixels to memory so they can be shown on the screen
         colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; 
-        
-        // We aren't using stencil buffers right now
         colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        
-        // The image starts in an undefined layout, but must transition to a 
-        // PRESENT_SRC layout so the Linux window manager can display it
         colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-        // 2. Define the subpass (We only need one basic graphics subpass)
         VkAttachmentReference colorAttachmentRef{};
-        colorAttachmentRef.attachment = 0; // Index of the attachment array
+        colorAttachmentRef.attachment = 0; 
         colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+        // --- NEW: DEPTH ATTACHMENT ---
+        VkAttachmentDescription depthAttachment{};
+        depthAttachment.format = depthFormat;
+        depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;     // Clear depth every frame
+        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // We don't care about saving the depth data after the frame is drawn
+        depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference depthAttachmentRef{};
+        depthAttachmentRef.attachment = 1; // Index 1 in the array below
+        depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        // 2. Subpass
         VkSubpassDescription subpass{};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &colorAttachmentRef;
+        // Connect the depth buffer to the subpass
+        subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
-        // 3. Define subpass dependencies to synchronize image transitions
+        // 3. Dependencies
         VkSubpassDependency dependency{};
-        dependency.srcSubpass = VK_SUBPASS_EXTERNAL; // The operation before our pass (the swapchain acquiring the image)
-        dependency.dstSubpass = 0;                   // Our actual subpass
+        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        dependency.dstSubpass = 0;
         
-        // Wait until the image is completely ready before we start writing colors to it
-        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        // Wait on both Color AND Depth stages before writing
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         dependency.srcAccessMask = 0;
-        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
-        // 4. Create the Render Pass
+        std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
+
         VkRenderPassCreateInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount = 1;
-        renderPassInfo.pAttachments = &colorAttachment;
+        renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+        renderPassInfo.pAttachments = attachments.data();
         renderPassInfo.subpassCount = 1;
         renderPassInfo.pSubpasses = &subpass;
         renderPassInfo.dependencyCount = 1;
@@ -71,8 +78,6 @@ namespace Engine::Graphics {
         if (vkCreateRenderPass(m_context.getDevice(), &renderPassInfo, nullptr, &m_renderPass) != VK_SUCCESS) {
             throw std::runtime_error("Critical Error: Failed to create Vulkan Render Pass!");
         }
-
-        std::cout << "Render Pass created successfully.\n";
     }
 
 } // namespace Engine::Graphics

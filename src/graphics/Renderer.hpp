@@ -3,6 +3,7 @@
 #include "../core/Window.hpp"
 #include "../core/Config.hpp"
 #include "VulkanContext.hpp"
+#include "VulkanBufferManager.hpp"
 #include "Swapchain.hpp"
 #include "RenderPass.hpp"
 #include "GraphicsPipeline.hpp"
@@ -21,18 +22,13 @@ namespace Engine::Graphics {
         ~Renderer();
 
         void beginUI();
-        
-        // Now dynamically draws all entities passed to it!
         void drawFrame(const glm::mat4& viewProj, const std::vector<Scene::SceneEntity>& activeEntities, ModelLoader& modelLoader);
         
-        // --- VRAM Management ---
-        void uploadModel(std::shared_ptr<Model> model);
-        void freeUploadedModels(); // Cleans the GPU to prevent memory leaks!
+        // Expose BufferManager cleanly so GameManager can upload models without caring how it works
+        void uploadModel(std::shared_ptr<Model> model) { m_bufferManager->uploadModel(model); }
+        void freeUploadedModels() { m_bufferManager->freeUploadedModels(); }
         
         void rebuildGraphicsPipeline();
-
-        // Restored missing SSBO placeholder declaration
-        void uploadDataToSSBO(const std::vector<float>& data);
 
         const GpuSpecs& getGpuSpecs() const { return m_vulkanContext->getGpuSpecs(); }
 
@@ -41,11 +37,13 @@ namespace Engine::Graphics {
         Core::Config& m_config;
         
         std::unique_ptr<VulkanContext> m_vulkanContext;
+        
+        // --- THE NEW SUBSYSTEM ---
+        std::unique_ptr<VulkanBufferManager> m_bufferManager;
+        
         std::unique_ptr<Swapchain> m_swapchain; 
         std::unique_ptr<RenderPass> m_renderPass;
         std::unique_ptr<GraphicsPipeline> m_graphicsPipeline;
-        
-        std::vector<std::shared_ptr<Model>> m_uploadedModels;
 
         std::vector<VkFramebuffer> m_swapchainFramebuffers;
         VkCommandPool m_commandPool;
@@ -67,16 +65,7 @@ namespace Engine::Graphics {
         void createImGuiDescriptorPool();
         void recreateSwapchain();
 
-        // GPU Buffer Helpers
-        void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, VkBuffer& buffer, VmaAllocation& allocation);
-        void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
-        VkCommandBuffer beginSingleTimeCommands();
-        void endSingleTimeCommands(VkCommandBuffer commandBuffer);
-
         void initImGui();
-        
-        // Restored missing compute shader placeholder declaration
-        void loadEmbeddedShaders();
     };
 
 } // namespace Engine::Graphics

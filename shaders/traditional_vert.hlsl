@@ -1,4 +1,3 @@
-// --- DYNAMIC VERTEX INJECTION ---
 struct VSInput {
     [[vk::location(0)]] float3 Position : POSITION;
     [[vk::location(1)]] float3 Normal   : NORMAL;
@@ -7,12 +6,14 @@ struct VSInput {
     [[vk::location(4)]] float4 Tangent  : TANGENT;
 };
 
+// --- PIPELINE DATA BUS ---
 struct VSOutput {
     float4 Pos : SV_POSITION;
-    float3 Color : COLOR;
+    float3 Normal : NORMAL;
+    float2 UV : TEXCOORD;
+    float4 Color : COLOR0;
 };
 
-// We expanded the fast block to hold BOTH the Camera and the Object's location!
 struct PushConstants {
     float4x4 viewProj;
     float4x4 model;
@@ -22,14 +23,16 @@ struct PushConstants {
 VSOutput main(VSInput input) {
     VSOutput output;
     
-    // 1. Move the raw vertex to its designated location in the world
     float4 worldPos = mul(pc.model, float4(input.Position, 1.0));
-    
-    // 2. Project it onto the camera lens
     output.Pos = mul(pc.viewProj, worldPos);
     
-    // 3. For now, we will draw the Normal vectors as colors so you can see beautiful 3D shading!
-    output.Color = input.Normal * 0.5 + 0.5;
+    // Rotate the model's normal vectors by the matrix so lighting reacts 
+    // correctly if the crate is rotated upside down!
+    output.Normal = normalize(mul((float3x3)pc.model, input.Normal));
+    
+    // Pass the extracted UV coordinates straight to the fragment shader
+    output.UV = input.UV;
+    output.Color = input.Color;
     
     return output;
 }

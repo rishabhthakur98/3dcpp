@@ -27,6 +27,11 @@ namespace Engine::UI {
         m_uiCamStartPitch = m_config.getFloat("cam_start_pitch", 0.0f);
         m_uiCamStartYaw = m_config.getFloat("cam_start_yaw", 0.0f);
         m_uiCamStartRoll = m_config.getFloat("cam_start_roll", 0.0f);
+        
+        // Load FOV parameters
+        camera.fov = m_config.getFloat("cam_fov", 60.0f);
+        camera.nearPlane = m_config.getFloat("cam_near", 0.1f);
+        camera.farPlane = m_config.getFloat("cam_far", 1000.0f);
     }
 
     void GuiManager::saveUIToConfig(Game::Camera& camera) {
@@ -49,6 +54,12 @@ namespace Engine::UI {
         m_config.setFloat("cam_start_pitch", m_uiCamStartPitch);
         m_config.setFloat("cam_start_yaw", m_uiCamStartYaw);
         m_config.setFloat("cam_start_roll", m_uiCamStartRoll);
+        
+        // Save FOV parameters
+        m_config.setFloat("cam_fov", camera.fov);
+        m_config.setFloat("cam_near", camera.nearPlane);
+        m_config.setFloat("cam_far", camera.farPlane);
+        
         m_config.save();
     }
 
@@ -127,7 +138,6 @@ namespace Engine::UI {
     }
 
     void GuiManager::renderSettings(Game::Camera& camera, std::function<void()> onBack) {
-        // Load configurations into UI state variables on first open
         static bool loaded = false;
         if (!loaded) { loadConfigToUI(camera); loaded = true; }
 
@@ -195,6 +205,14 @@ namespace Engine::UI {
                 ImGui::Checkbox("Enable Developer Mode (Overlay)", &m_uiDevMode);
                 ImGui::Dummy(ImVec2(0.0f, 10.0f)); ImGui::Separator(); ImGui::Dummy(ImVec2(0.0f, 10.0f));
 
+                // --- THE NEW CAMERA LENS SLIDERS ---
+                ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Camera Lens Settings:");
+                ImGui::SliderFloat("Field of View (FOV)", &camera.fov, 30.0f, 120.0f);
+                ImGui::SliderFloat("Near Clip Plane", &camera.nearPlane, 0.01f, 10.0f);
+                ImGui::SliderFloat("Far Clip Plane", &camera.farPlane, 100.0f, 10000.0f);
+
+                ImGui::Dummy(ImVec2(0.0f, 10.0f)); ImGui::Separator(); ImGui::Dummy(ImVec2(0.0f, 10.0f));
+
                 ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Rasterizer Settings (Requires Rebuild):");
                 ImGui::Checkbox("Enable Culling", &m_uiCullEnabled);
                 if (!m_uiCullEnabled) ImGui::BeginDisabled();
@@ -224,7 +242,7 @@ namespace Engine::UI {
         if (ImGui::Button("Apply and Save", ImVec2(200, 40))) {
             saveUIToConfig(camera);
             applyDisplayChanges();
-            loaded = false; // Reset for next time
+            loaded = false; 
             onBack();
         }
         ImGui::SameLine();
@@ -253,6 +271,9 @@ namespace Engine::UI {
             glm::vec3 rot = camera.getEulerAngles();
             ImGui::Text("Camera Pos: [ X: %.2f,  Y: %.2f,  Z: %.2f ]", pos.x, pos.y, pos.z);
             ImGui::Text("Camera Rot: [ P: %.2f,  Y: %.2f,  R: %.2f ]", rot.x, rot.y, rot.z);
+            
+            // --- NEW: FOV Tracking in Overlay ---
+            ImGui::Text("Lens FOV: %.1f", camera.fov);
         }
 
         ImGui::Dummy(ImVec2(0.0f, 5.0f));
