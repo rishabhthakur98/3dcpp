@@ -11,8 +11,7 @@ namespace Engine::Graphics {
 
     class GraphicsPipeline {
     public:
-        // Changed boolean face order to an intuitive int cullMode (0=Back, 1=Front)
-        GraphicsPipeline(VulkanContext& context, VkRenderPass renderPass, PipelineType type, bool cullEnabled, int cullMode);
+        GraphicsPipeline(VulkanContext& context, VkRenderPass renderPass, PipelineType type, bool cullEnabled, int cullMode, VkDescriptorSetLayout layout);
         ~GraphicsPipeline();
 
         GraphicsPipeline(const GraphicsPipeline&) = delete;
@@ -35,7 +34,6 @@ namespace Engine::Graphics {
         VkPipelineLayout m_pipelineLayout;
         VkDescriptorSetLayout m_descriptorSetLayout; 
 
-        void createDescriptorSetLayout();
         void createPipelineLayout();
         void createPipeline(VkRenderPass renderPass);
         

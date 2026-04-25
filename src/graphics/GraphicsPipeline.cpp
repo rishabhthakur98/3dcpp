@@ -9,11 +9,10 @@
 
 namespace Engine::Graphics {
 
-    GraphicsPipeline::GraphicsPipeline(VulkanContext& context, VkRenderPass renderPass, PipelineType type, bool cullEnabled, int cullMode)
+    GraphicsPipeline::GraphicsPipeline(VulkanContext& context, VkRenderPass renderPass, PipelineType type, bool cullEnabled, int cullMode, VkDescriptorSetLayout layout)
         : m_context(context), m_type(type), m_cullEnabled(cullEnabled), m_cullMode(cullMode), 
-          m_pipeline(VK_NULL_HANDLE), m_pipelineLayout(VK_NULL_HANDLE), m_descriptorSetLayout(VK_NULL_HANDLE) {
+          m_pipeline(VK_NULL_HANDLE), m_pipelineLayout(VK_NULL_HANDLE), m_descriptorSetLayout(layout) {
         
-        createDescriptorSetLayout();
         createPipelineLayout();
         createPipeline(renderPass);
     }
@@ -22,7 +21,6 @@ namespace Engine::Graphics {
         VkDevice device = m_context.getDevice();
         if (m_pipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, m_pipeline, nullptr);
         if (m_pipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(device, m_pipelineLayout, nullptr);
-        if (m_descriptorSetLayout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
     }
 
     VkShaderModule GraphicsPipeline::createShaderModule(const unsigned char* code, size_t size) {
@@ -38,45 +36,15 @@ namespace Engine::Graphics {
         return shaderModule;
     }
 
-    void GraphicsPipeline::createDescriptorSetLayout() {
-        VkDescriptorSetLayoutBinding ssboBinding{};
-        ssboBinding.binding = 0; 
-        ssboBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        ssboBinding.descriptorCount = 1000; 
-        ssboBinding.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT;
-        ssboBinding.pImmutableSamplers = nullptr;
-
-        VkDescriptorBindingFlags bindlessFlags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | 
-                                                 VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
-
-        VkDescriptorSetLayoutBindingFlagsCreateInfo layoutFlags{};
-        layoutFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
-        layoutFlags.bindingCount = 1;
-        layoutFlags.pBindingFlags = &bindlessFlags;
-
-        VkDescriptorSetLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.pNext = &layoutFlags;
-        layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT; 
-        layoutInfo.bindingCount = 1;
-        layoutInfo.pBindings = &ssboBinding;
-
-        if (vkCreateDescriptorSetLayout(m_context.getDevice(), &layoutInfo, nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
-            throw std::runtime_error("Critical Error: Failed to create Bindless Descriptor Set Layout!");
-        }
-    }
-
     void GraphicsPipeline::createPipelineLayout() {
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipelineLayoutInfo.setLayoutCount = 0;
-        pipelineLayoutInfo.pSetLayouts = nullptr;
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
 
         VkPushConstantRange pushConstantRange{};
         pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         pushConstantRange.offset = 0;
-        
-        // Size doubled to hold ViewProj (64 bytes) + Model (64 bytes) = 128 bytes total
         pushConstantRange.size = sizeof(glm::mat4) * 2;
 
         pipelineLayoutInfo.pushConstantRangeCount = 1; 
@@ -114,7 +82,6 @@ namespace Engine::Graphics {
             throw std::runtime_error("Meshlet pipeline shaders not yet implemented!");
         }
 
-        // Inform the pipeline about the layout of our Vertex struct
         auto bindingDescription = Vertex::getBindingDescription();
         auto attributeDescriptions = Vertex::getAttributeDescriptions();
 
@@ -148,7 +115,6 @@ namespace Engine::Graphics {
             rasterizer.cullMode = (m_cullMode == 0) ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_FRONT_BIT;
         }
         
-        // glTF standard front face winding
         rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         rasterizer.depthBiasEnable = VK_FALSE;
 
@@ -157,12 +123,11 @@ namespace Engine::Graphics {
         multisampling.sampleShadingEnable = VK_FALSE;
         multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-        // DEPTH STENCIL STATE - Enables proper z-buffering
         VkPipelineDepthStencilStateCreateInfo depthStencil{};
         depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
         depthStencil.depthTestEnable = VK_TRUE;
         depthStencil.depthWriteEnable = VK_TRUE;
-        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS; // Overwrite if the depth is lower (closer)
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS; 
         depthStencil.depthBoundsTestEnable = VK_FALSE;
         depthStencil.stencilTestEnable = VK_FALSE;
 
@@ -194,7 +159,7 @@ namespace Engine::Graphics {
         pipelineInfo.pViewportState = &viewportState;
         pipelineInfo.pRasterizationState = &rasterizer;
         pipelineInfo.pMultisampleState = &multisampling;
-        pipelineInfo.pDepthStencilState = &depthStencil; // Apply depth state here
+        pipelineInfo.pDepthStencilState = &depthStencil; 
         pipelineInfo.pColorBlendState = &colorBlending;
         pipelineInfo.pDynamicState = &dynamicState;
         pipelineInfo.layout = m_pipelineLayout;

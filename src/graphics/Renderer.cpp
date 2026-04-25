@@ -21,7 +21,9 @@ namespace Engine::Graphics {
         VkDevice device = m_vulkanContext->getDevice();
         vkDeviceWaitIdle(device);
 
-        // Tell the buffer manager to nuke the memory
+        freeUploadedModels();
+        m_defaultTexture.reset();
+
         m_bufferManager.reset();
 
         ImGui_ImplVulkan_Shutdown();
@@ -29,6 +31,8 @@ namespace Engine::Graphics {
         ImGui::DestroyContext();
         
         if (m_imguiDescriptorPool != VK_NULL_HANDLE) vkDestroyDescriptorPool(device, m_imguiDescriptorPool, nullptr);
+        if (m_descriptorPool != VK_NULL_HANDLE) vkDestroyDescriptorPool(device, m_descriptorPool, nullptr);
+        if (m_descriptorSetLayout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroySemaphore(device, m_renderFinishedSemaphores[i], nullptr);
@@ -45,14 +49,38 @@ namespace Engine::Graphics {
         
         m_vulkanContext = std::make_unique<VulkanContext>(m_window);
         m_swapchain = std::make_unique<Swapchain>(*m_vulkanContext, m_window);
-        
-        // Pass both formats to the RenderPass
         m_renderPass = std::make_unique<RenderPass>(*m_vulkanContext, m_swapchain->getImageFormat(), m_swapchain->getDepthFormat());
         
         createCommandPool();
-        
-        // Initialize our new Memory subsystem
         m_bufferManager = std::make_unique<VulkanBufferManager>(*m_vulkanContext, m_commandPool);
+
+        // CREATE TEXTURE DESCRIPTOR LAYOUT
+        VkDescriptorSetLayoutBinding textureBinding{};
+        textureBinding.binding = 0;
+        textureBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        textureBinding.descriptorCount = 1;
+        textureBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &textureBinding;
+        vkCreateDescriptorSetLayout(m_vulkanContext->getDevice(), &layoutInfo, nullptr, &m_descriptorSetLayout);
+
+        // CREATE DESCRIPTOR POOL
+        VkDescriptorPoolSize poolSize{};
+        poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        poolSize.descriptorCount = 1000;
+        
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = 1;
+        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.maxSets = 1000;
+        vkCreateDescriptorPool(m_vulkanContext->getDevice(), &poolInfo, nullptr, &m_descriptorPool);
+
+        // CREATE FALLBACK TEXTURE
+        m_defaultTexture = std::make_shared<Texture>(*m_vulkanContext, *m_bufferManager);
 
         rebuildGraphicsPipeline();
         createFramebuffers();
@@ -68,14 +96,13 @@ namespace Engine::Graphics {
 
         bool hwSupportsMesh = m_vulkanContext->getGpuSpecs().supportsMeshShaders;
         bool userWantsMesh = m_config.getBool("mesh_shaders", false);
-        
         bool cullEnabled = m_config.getBool("cull_enabled", false);
         int cullMode = m_config.getInt("cull_mode", 0);
 
         PipelineType typeToBuild = (hwSupportsMesh && userWantsMesh) ? PipelineType::Meshlet : PipelineType::Traditional;
 
         m_graphicsPipeline.reset();
-        m_graphicsPipeline = std::make_unique<GraphicsPipeline>(*m_vulkanContext, m_renderPass->getHandle(), typeToBuild, cullEnabled, cullMode);
+        m_graphicsPipeline = std::make_unique<GraphicsPipeline>(*m_vulkanContext, m_renderPass->getHandle(), typeToBuild, cullEnabled, cullMode, m_descriptorSetLayout);
         
         std::cout << "[Vulkan] Graphics Pipeline rebuilt with current configurations.\n";
     }
@@ -97,8 +124,6 @@ namespace Engine::Graphics {
 
         m_swapchain = std::make_unique<Swapchain>(*m_vulkanContext, m_window);
         createFramebuffers();
-        
-        std::cout << "[Vulkan] Swapchain recreated successfully.\n";
     }
 
     void Renderer::createFramebuffers() {
@@ -107,7 +132,6 @@ namespace Engine::Graphics {
         m_swapchainFramebuffers.resize(imageViews.size());
 
         for (size_t i = 0; i < imageViews.size(); i++) {
-            // Attach both the Color Image View and the Depth Image View
             std::array<VkImageView, 2> attachments = {
                 imageViews[i],
                 m_swapchain->getDepthImageView()
@@ -215,9 +239,7 @@ namespace Engine::Graphics {
     void Renderer::initImGui() {
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO(); (void)io;
-        
         io.IniFilename = nullptr; 
-        
         ImGui_ImplGlfw_InitForVulkan(m_window.getNativeWindow(), true);
         
         ImGui_ImplVulkan_InitInfo init_info = {};
@@ -231,6 +253,55 @@ namespace Engine::Graphics {
         init_info.PipelineInfoMain.RenderPass = m_renderPass->getHandle();
 
         ImGui_ImplVulkan_Init(&init_info);
+    }
+
+    void Renderer::uploadModel(std::shared_ptr<Model> model) {
+        if (model->isUploaded) return;
+
+        m_bufferManager->uploadModel(model);
+
+        for (auto& mesh : model->meshes) {
+            // ALLOCATE TEXTURE AND DESCRIPTOR SET
+            if (!mesh.rawTextureData.empty()) {
+                mesh.texture = std::make_shared<Texture>(*m_vulkanContext, *m_bufferManager, mesh.rawTextureData);
+            } else {
+                mesh.texture = m_defaultTexture;
+            }
+
+            VkDescriptorSetAllocateInfo allocInfo{};
+            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocInfo.descriptorPool = m_descriptorPool;
+            allocInfo.descriptorSetCount = 1;
+            allocInfo.pSetLayouts = &m_descriptorSetLayout;
+            
+            if (vkAllocateDescriptorSets(m_vulkanContext->getDevice(), &allocInfo, &mesh.descriptorSet) != VK_SUCCESS) {
+                throw std::runtime_error("Critical Error: Failed to allocate texture descriptor sets!");
+            }
+
+            VkDescriptorImageInfo imageInfo{};
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo.imageView = mesh.texture->getImageView();
+            imageInfo.sampler = mesh.texture->getSampler();
+
+            VkWriteDescriptorSet descriptorWrite{};
+            descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite.dstSet = mesh.descriptorSet;
+            descriptorWrite.dstBinding = 0;
+            descriptorWrite.dstArrayElement = 0;
+            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrite.descriptorCount = 1;
+            descriptorWrite.pImageInfo = &imageInfo;
+
+            vkUpdateDescriptorSets(m_vulkanContext->getDevice(), 1, &descriptorWrite, 0, nullptr);
+            mesh.isUploaded = true;
+        }
+        model->isUploaded = true;
+    }
+
+    void Renderer::freeUploadedModels() {
+        vkDeviceWaitIdle(m_vulkanContext->getDevice());
+        m_bufferManager->freeUploadedModels();
+        // Textures and Descriptor Sets are freed automatically through shared_ptr reset and Pool destruction.
     }
 
     void Renderer::beginUI() {
@@ -272,20 +343,13 @@ namespace Engine::Graphics {
         renderPassInfo.renderArea.offset = {0, 0};
         renderPassInfo.renderArea.extent = m_swapchain->getExtent();
 
-        // =========================================================================
-        // --- THE FIX: C++11 STRICT COMPLIANT UNION ASSIGNMENT ---
-        // By instantiating the specific clear structs first, we bypass the 
-        // braced initializer bug in strict GCC compilers.
-        // =========================================================================
         VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
         VkClearValue clearDepth = {};
         clearDepth.depthStencil = {1.0f, 0};
 
         std::array<VkClearValue, 2> clearValues = { clearColor, clearDepth };
-
         renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
         renderPassInfo.pClearValues = clearValues.data();
-        // =========================================================================
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -329,6 +393,9 @@ namespace Engine::Graphics {
 
             for (const auto& mesh : model->meshes) {
                 if (!mesh.isUploaded) continue;
+
+                // BIND TEXTURE DESCRIPTOR
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline->getLayout(), 0, 1, &mesh.descriptorSet, 0, nullptr);
 
                 VkBuffer vertexBuffers[] = { mesh.vertexBuffer };
                 VkDeviceSize offsets[] = { 0 };

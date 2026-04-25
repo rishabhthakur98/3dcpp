@@ -17,7 +17,7 @@ namespace Engine::Graphics {
 
     std::shared_ptr<Model> ModelLoader::loadModel(const std::string& filepath) {
         if (m_assetCache.find(filepath) != m_assetCache.end()) {
-            return m_assetCache[filepath]; // Fast return if already in RAM
+            return m_assetCache[filepath]; 
         }
 
         cgltf_options options = {};
@@ -37,7 +37,6 @@ namespace Engine::Graphics {
         auto model = std::make_shared<Model>();
         model->name = filepath;
 
-        // --- ROBUST DATA EXTRACTION ---
         for (cgltf_size m = 0; m < data->meshes_count; ++m) {
             cgltf_mesh* cgltfMesh = &data->meshes[m];
 
@@ -45,7 +44,6 @@ namespace Engine::Graphics {
                 cgltf_primitive* primitive = &cgltfMesh->primitives[p];
                 Mesh newMesh;
 
-                // 1. Determine total vertices in this primitive
                 cgltf_size vertexCount = 0;
                 for (cgltf_size a = 0; a < primitive->attributes_count; ++a) {
                     if (primitive->attributes[a].type == cgltf_attribute_type_position) {
@@ -55,8 +53,6 @@ namespace Engine::Graphics {
                 }
                 newMesh.vertices.resize(vertexCount);
 
-                // 2. Safe, dynamic extraction using cgltf_accessor_read_float
-                // This guarantees we get the data regardless of how the 3D artist compressed or interleaved it!
                 for (cgltf_size a = 0; a < primitive->attributes_count; ++a) {
                     cgltf_attribute* attr = &primitive->attributes[a];
                     
@@ -72,19 +68,25 @@ namespace Engine::Graphics {
                         } else if (attr->type == cgltf_attribute_type_tangent) {
                             cgltf_accessor_read_float(attr->data, v, &newMesh.vertices[v].tangent.x, 4);
                         }
-                        // If it's a weird tag/flag we don't recognize, the loader seamlessly skips it!
                     }
                 }
 
-                // 3. Fallback Generation
-                // If the artist forgot to export normals or colors, we fill them with safe defaults
-                // so the engine doesn't crash or render pure black geometries.
                 for (auto& vert : newMesh.vertices) {
                     if (glm::length(vert.normal) < 0.01f) vert.normal = glm::vec3(0.0f, 1.0f, 0.0f);
                     if (glm::length(vert.color) < 0.01f)  vert.color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
                 }
 
-                // 4. Robust Indices Extraction
+                // Extract embedded texture binary data
+                if (primitive->material && primitive->material->has_pbr_metallic_roughness) {
+                    cgltf_texture_view& texView = primitive->material->pbr_metallic_roughness.base_color_texture;
+                    if (texView.texture && texView.texture->image && texView.texture->image->buffer_view) {
+                        cgltf_image* image = texView.texture->image;
+                        uint8_t* imgData = (uint8_t*)image->buffer_view->buffer->data + image->buffer_view->offset;
+                        size_t imgSize = image->buffer_view->size;
+                        newMesh.rawTextureData.assign(imgData, imgData + imgSize);
+                    }
+                }
+
                 if (primitive->indices != nullptr) {
                     cgltf_size indexCount = primitive->indices->count;
                     newMesh.indices.resize(indexCount);
@@ -92,7 +94,6 @@ namespace Engine::Graphics {
                         newMesh.indices[i] = static_cast<uint32_t>(cgltf_accessor_read_index(primitive->indices, i));
                     }
                 } else {
-                    // Fallback: If no indices exist, auto-generate sequential indices
                     newMesh.indices.resize(vertexCount);
                     for (uint32_t i = 0; i < vertexCount; ++i) newMesh.indices[i] = i;
                 }

@@ -8,6 +8,7 @@
 #include "RenderPass.hpp"
 #include "GraphicsPipeline.hpp"
 #include "ModelLoader.hpp"
+#include "Texture.hpp"
 #include "../scene/SceneLoader.hpp"
 
 #include <vector>
@@ -24,21 +25,16 @@ namespace Engine::Graphics {
         void beginUI();
         void drawFrame(const glm::mat4& viewProj, const std::vector<Scene::SceneEntity>& activeEntities, ModelLoader& modelLoader);
         
-        // Expose BufferManager cleanly so GameManager can upload models without caring how it works
-        void uploadModel(std::shared_ptr<Model> model) { m_bufferManager->uploadModel(model); }
-        void freeUploadedModels() { m_bufferManager->freeUploadedModels(); }
+        void uploadModel(std::shared_ptr<Model> model);
+        void freeUploadedModels(); 
         
         void rebuildGraphicsPipeline();
-
-        const GpuSpecs& getGpuSpecs() const { return m_vulkanContext->getGpuSpecs(); }
 
     private:
         Core::Window& m_window;
         Core::Config& m_config;
         
         std::unique_ptr<VulkanContext> m_vulkanContext;
-        
-        // --- THE NEW SUBSYSTEM ---
         std::unique_ptr<VulkanBufferManager> m_bufferManager;
         
         std::unique_ptr<Swapchain> m_swapchain; 
@@ -49,13 +45,18 @@ namespace Engine::Graphics {
         VkCommandPool m_commandPool;
         std::vector<VkCommandBuffer> m_commandBuffers;
 
+        // Texture Descriptor Resources
+        VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
+        VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
+        std::shared_ptr<Texture> m_defaultTexture;
+
         const int MAX_FRAMES_IN_FLIGHT = 2;
         uint32_t m_currentFrame = 0;
 
         std::vector<VkSemaphore> m_imageAvailableSemaphores;
         std::vector<VkSemaphore> m_renderFinishedSemaphores;
         std::vector<VkFence> m_inFlightFences;
-        VkDescriptorPool m_imguiDescriptorPool;
+        VkDescriptorPool m_imguiDescriptorPool = VK_NULL_HANDLE;
 
         void initVulkan();
         void createFramebuffers();
