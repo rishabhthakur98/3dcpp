@@ -39,3 +39,24 @@
 
 # debug information files
 *.dwo
+
+
+# CMake and build artifacts
+build/
+.cache/
+compile_commands.json
+
+# Compiled binaries and generated shader headers
+*.exe
+*.o
+*.a
+*.so
+*.spv
+*_spv.h
+
+# VS Code / IDE settings
+.vscode/
+.idea/
+
+# Vendor tools (You might want to keep libraries, but ignore massive tool binaries if using Git LFS)
+# tools/dxc/
