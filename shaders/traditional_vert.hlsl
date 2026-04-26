@@ -6,16 +6,29 @@ struct VSInput {
     [[vk::location(4)]] float4 Tangent  : TANGENT;
 };
 
-// --- PIPELINE DATA BUS ---
 struct VSOutput {
     float4 Pos : SV_POSITION;
-    float3 Normal : NORMAL;
+    float3 WorldPos : POSITION0;
     float2 UV : TEXCOORD;
     float4 Color : COLOR0;
+    float3 TangentViewPos  : POSITION1;
+    float3 TangentFragPos  : POSITION2;
+    float3x3 TBN           : MATRIX;
 };
 
-struct PushConstants {
+// Global SSBO Configuration
+struct GlobalData {
     float4x4 viewProj;
+    float4 camPos;
+    float pomScale;
+    int usePOM;
+    int usePBR;
+    float padding;
+};
+[[vk::binding(0, 0)]] StructuredBuffer<GlobalData> globalBuffer;
+
+// Dynamic Push Constants for per-model translation
+struct PushConstants {
     float4x4 model;
 };
 [[vk::push_constant]] PushConstants pc;
@@ -23,16 +36,33 @@ struct PushConstants {
 VSOutput main(VSInput input) {
     VSOutput output;
     
-    float4 worldPos = mul(pc.model, float4(input.Position, 1.0));
-    output.Pos = mul(pc.viewProj, worldPos);
+    // Transform vertex position to world space
+    output.WorldPos = mul(pc.model, float4(input.Position, 1.0)).xyz;
     
-    // Rotate the model's normal vectors by the matrix so lighting reacts 
-    // correctly if the crate is rotated upside down!
-    output.Normal = normalize(mul((float3x3)pc.model, input.Normal));
+    // Transform from world space to projection space using the camera
+    output.Pos = mul(globalBuffer[0].viewProj, float4(output.WorldPos, 1.0));
     
-    // Pass the extracted UV coordinates straight to the fragment shader
     output.UV = input.UV;
     output.Color = input.Color;
+    
+    // Calculate Tangent Space (TBN) Matrix
+    float3x3 normalMatrix = (float3x3)pc.model; 
+    float3 T = normalize(mul(normalMatrix, input.Tangent.xyz));
+    float3 N = normalize(mul(normalMatrix, input.Normal));
+    
+    // Re-orthogonalize T with respect to N using Gram-Schmidt process
+    T = normalize(T - dot(T, N) * N);
+    
+    // Calculate Bitangent
+    float3 B = cross(N, T) * input.Tangent.w; 
+    
+    // Construct the TBN Matrix (World Space to Tangent Space)
+    output.TBN = float3x3(T, B, N);
+    
+    // Transform the Camera and Fragment positions into Tangent Space
+    // We multiply using output.TBN directly, NOT the inverse, to enter Tangent Space!
+    output.TangentViewPos = mul(output.TBN, globalBuffer[0].camPos.xyz);
+    output.TangentFragPos = mul(output.TBN, output.WorldPos);
     
     return output;
 }

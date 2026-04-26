@@ -17,13 +17,23 @@
 
 namespace Engine::Graphics {
 
+    // --- REPLACED UBO WITH SSBO ---
+    struct alignas(16) GlobalSSBO {
+        glm::mat4 viewProj;
+        glm::vec4 camPos;
+        float pomScale;
+        int usePOM;
+        int usePBR;
+        float padding;
+    };
+
     class Renderer {
     public:
         Renderer(Core::Window& window, Core::Config& config);
         ~Renderer();
 
         void beginUI();
-        void drawFrame(const glm::mat4& viewProj, const std::vector<Scene::SceneEntity>& activeEntities, ModelLoader& modelLoader);
+        void drawFrame(const glm::mat4& viewProj, const glm::vec3& camPos, const std::vector<Scene::SceneEntity>& activeEntities, ModelLoader& modelLoader);
         
         void uploadModel(std::shared_ptr<Model> model);
         void freeUploadedModels(); 
@@ -45,8 +55,15 @@ namespace Engine::Graphics {
         VkCommandPool m_commandPool;
         std::vector<VkCommandBuffer> m_commandBuffers;
 
-        // Texture Descriptor Resources
-        VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
+        // SSBO Tracking
+        VkDescriptorSetLayout m_globalDescriptorSetLayout = VK_NULL_HANDLE;
+        VkDescriptorSetLayout m_materialDescriptorSetLayout = VK_NULL_HANDLE;
+        
+        std::vector<VkBuffer> m_globalSsboBuffers;
+        std::vector<VmaAllocation> m_globalSsboAllocations;
+        std::vector<void*> m_globalSsboMapped;
+        std::vector<VkDescriptorSet> m_globalDescriptorSets;
+
         VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
         std::shared_ptr<Texture> m_defaultTexture;
 

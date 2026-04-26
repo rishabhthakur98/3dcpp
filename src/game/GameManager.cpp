@@ -50,7 +50,9 @@ namespace Engine::Game {
 
         // Draw the Vulkan Frame and pass all our dynamically loaded entities over to the GPU
         glm::mat4 viewProj = m_camera.getViewProjection(static_cast<float>(m_window.getWidth()), static_cast<float>(m_window.getHeight()));
-        m_renderer.drawFrame(viewProj, m_activeEntities, m_modelLoader);
+        
+        // Pass the explicit camera position so the shader has perfect Vector math for PBR and reflections!
+        m_renderer.drawFrame(viewProj, m_camera.getPosition(), m_activeEntities, m_modelLoader);
     }
 
     void GameManager::loadWorld(const std::string& worldName) {

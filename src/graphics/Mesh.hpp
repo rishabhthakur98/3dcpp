@@ -8,26 +8,31 @@
 
 namespace Engine::Graphics {
 
-    class Texture; // Forward declaration
+    class Texture; 
 
     struct Mesh {
-        // CPU Data
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
         
-        // Raw embedded PNG/JPEG data extracted directly from the .glb file
-        std::vector<uint8_t> rawTextureData;
+        // PBR Raw Data Blocks
+        std::vector<uint8_t> rawAlbedoData;
+        std::vector<uint8_t> rawNormalData;
+        std::vector<uint8_t> rawMetRoughData;
+        std::vector<uint8_t> rawHeightData;
 
-        // GPU Resources
+        // VRAM Buffers
         VkBuffer vertexBuffer = VK_NULL_HANDLE;
         VmaAllocation vertexAllocation = VK_NULL_HANDLE;
-        
         VkBuffer indexBuffer = VK_NULL_HANDLE;
         VmaAllocation indexAllocation = VK_NULL_HANDLE;
         
-        std::shared_ptr<Texture> texture = nullptr;
-        VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+        // AAA Texture Set
+        std::shared_ptr<Texture> albedoTex = nullptr;
+        std::shared_ptr<Texture> normalTex = nullptr;
+        std::shared_ptr<Texture> metRoughTex = nullptr;
+        std::shared_ptr<Texture> heightTex = nullptr;
 
+        VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
         bool isUploaded = false;
     };
 

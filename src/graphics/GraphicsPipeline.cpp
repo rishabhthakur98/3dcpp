@@ -9,9 +9,9 @@
 
 namespace Engine::Graphics {
 
-    GraphicsPipeline::GraphicsPipeline(VulkanContext& context, VkRenderPass renderPass, PipelineType type, bool cullEnabled, int cullMode, VkDescriptorSetLayout layout)
+    GraphicsPipeline::GraphicsPipeline(VulkanContext& context, VkRenderPass renderPass, PipelineType type, bool cullEnabled, int cullMode, const std::vector<VkDescriptorSetLayout>& layouts)
         : m_context(context), m_type(type), m_cullEnabled(cullEnabled), m_cullMode(cullMode), 
-          m_pipeline(VK_NULL_HANDLE), m_pipelineLayout(VK_NULL_HANDLE), m_descriptorSetLayout(layout) {
+          m_pipeline(VK_NULL_HANDLE), m_pipelineLayout(VK_NULL_HANDLE), m_descriptorSetLayouts(layouts) {
         
         createPipelineLayout();
         createPipeline(renderPass);
@@ -39,13 +39,13 @@ namespace Engine::Graphics {
     void GraphicsPipeline::createPipelineLayout() {
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipelineLayoutInfo.setLayoutCount = 1;
-        pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
+        pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(m_descriptorSetLayouts.size());
+        pipelineLayoutInfo.pSetLayouts = m_descriptorSetLayouts.data();
 
         VkPushConstantRange pushConstantRange{};
-        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pushConstantRange.offset = 0;
-        pushConstantRange.size = sizeof(glm::mat4) * 2;
+        pushConstantRange.size = sizeof(glm::mat4); // Only sending the Model Matrix via Push Constants now
 
         pipelineLayoutInfo.pushConstantRangeCount = 1; 
         pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;

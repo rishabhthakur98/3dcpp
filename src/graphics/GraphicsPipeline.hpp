@@ -11,7 +11,8 @@ namespace Engine::Graphics {
 
     class GraphicsPipeline {
     public:
-        GraphicsPipeline(VulkanContext& context, VkRenderPass renderPass, PipelineType type, bool cullEnabled, int cullMode, VkDescriptorSetLayout layout);
+        // --- THE FIX: Now officially accepts a vector of layouts for our SSBO architecture ---
+        GraphicsPipeline(VulkanContext& context, VkRenderPass renderPass, PipelineType type, bool cullEnabled, int cullMode, const std::vector<VkDescriptorSetLayout>& layouts);
         ~GraphicsPipeline();
 
         GraphicsPipeline(const GraphicsPipeline&) = delete;
@@ -19,7 +20,6 @@ namespace Engine::Graphics {
 
         VkPipeline getHandle() const { return m_pipeline; }
         VkPipelineLayout getLayout() const { return m_pipelineLayout; }
-        VkDescriptorSetLayout getDescriptorSetLayout() const { return m_descriptorSetLayout; }
         
         PipelineType getType() const { return m_type; }
 
@@ -32,7 +32,9 @@ namespace Engine::Graphics {
 
         VkPipeline m_pipeline;
         VkPipelineLayout m_pipelineLayout;
-        VkDescriptorSetLayout m_descriptorSetLayout; 
+        
+        // --- THE FIX: Stores the array of layouts instead of just one ---
+        std::vector<VkDescriptorSetLayout> m_descriptorSetLayouts; 
 
         void createPipelineLayout();
         void createPipeline(VkRenderPass renderPass);
