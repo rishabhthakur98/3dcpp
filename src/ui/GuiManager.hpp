@@ -12,13 +12,12 @@ namespace Engine::UI {
 
     class GuiManager {
     public:
-        // Takes references to the core systems it needs to interact with
         GuiManager(Core::Window& window, Core::Config& config, Input::InputManager& inputManager, Graphics::Renderer& renderer);
         ~GuiManager() = default;
 
-        // Called by the GameManager to draw the current UI state
         void renderMainMenu(std::function<void()> onPlay, std::function<void()> onSettings, std::function<void()> onQuit);
         void renderWorldSelect(std::function<void(std::string)> onWorldLoad, std::function<void()> onBack);
+        void renderLoadingScreen(float progress); // --- NEW: Loading Screen ---
         void renderSettings(Game::Camera& camera, std::function<void()> onBack);
         void renderGameplayOverlay(Game::Camera& camera, size_t activeEntitiesCount, bool isDevMode);
 
@@ -28,7 +27,6 @@ namespace Engine::UI {
         Input::InputManager& m_inputManager;
         Graphics::Renderer& m_renderer;
 
-        // UI working variables
         bool m_uiFullscreen;
         int m_uiResolutionIndex;
         bool m_uiLimitFrames;
@@ -43,6 +41,10 @@ namespace Engine::UI {
         bool m_uiDevMode;
         bool m_uiCullEnabled;
         int m_uiCullMode; 
+        
+        // --- NEW: Displacement Mapping ---
+        bool m_uiDisplacement;
+        float m_uiDisplacementScale;
         
         float m_uiCamStartX, m_uiCamStartY, m_uiCamStartZ;
         float m_uiCamStartPitch, m_uiCamStartYaw, m_uiCamStartRoll;

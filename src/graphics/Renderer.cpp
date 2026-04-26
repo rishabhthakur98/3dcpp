@@ -25,7 +25,6 @@ namespace Engine::Graphics {
         freeUploadedModels();
         m_defaultTexture.reset();
         
-        // Destroy the SSBO buffers
         for(int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vmaUnmapMemory(m_vulkanContext->getAllocator(), m_globalSsboAllocations[i]);
             vmaDestroyBuffer(m_vulkanContext->getAllocator(), m_globalSsboBuffers[i], m_globalSsboAllocations[i]);
@@ -64,11 +63,11 @@ namespace Engine::Graphics {
         m_bufferManager = std::make_unique<VulkanBufferManager>(*m_vulkanContext, m_commandPool);
 
         // =========================================================================
-        // 1. CREATE SET 0: GLOBAL SSBO (Storage Buffer)
+        // 1. CREATE SET 0: GLOBAL SSBO 
         // =========================================================================
         VkDescriptorSetLayoutBinding ssboBinding{};
         ssboBinding.binding = 0;
-        ssboBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; // UPDATED to SSBO
+        ssboBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         ssboBinding.descriptorCount = 1;
         ssboBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         
@@ -86,7 +85,11 @@ namespace Engine::Graphics {
             bindings[i].binding = i;
             bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             bindings[i].descriptorCount = 1;
-            bindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            
+            // --- THE DISPLACEMENT FIX ---
+            // Allow the Vertex Shader to read from the bound Height map!
+            bindings[i].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT; 
+            
             bindings[i].pImmutableSamplers = nullptr;
         }
         
@@ -102,7 +105,7 @@ namespace Engine::Graphics {
         std::array<VkDescriptorPoolSize, 2> poolSizes{};
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         poolSizes[0].descriptorCount = 4000; 
-        poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; // UPDATED to SSBO
+        poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; 
         poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT; 
         
         VkDescriptorPoolCreateInfo poolInfo{};
@@ -129,7 +132,6 @@ namespace Engine::Graphics {
         vkAllocateDescriptorSets(m_vulkanContext->getDevice(), &allocInfo, m_globalDescriptorSets.data());
 
         for(int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            // UPDATED: Now mapped as a massive STORAGE buffer!
             m_bufferManager->createBuffer(sizeof(GlobalSSBO), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, m_globalSsboBuffers[i], m_globalSsboAllocations[i]);
             vmaMapMemory(m_vulkanContext->getAllocator(), m_globalSsboAllocations[i], &m_globalSsboMapped[i]);
 
@@ -143,7 +145,7 @@ namespace Engine::Graphics {
             descriptorWrite.dstSet = m_globalDescriptorSets[i];
             descriptorWrite.dstBinding = 0;
             descriptorWrite.dstArrayElement = 0;
-            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; // UPDATED
+            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; 
             descriptorWrite.descriptorCount = 1;
             descriptorWrite.pBufferInfo = &bufferInfo;
 
@@ -383,7 +385,6 @@ namespace Engine::Graphics {
 
         // =========================================================================
         // --- SSBO UPDATE ---
-        // Write global data to the mapped SSBO memory!
         // =========================================================================
         GlobalSSBO ssbo{};
         ssbo.viewProj = viewProj;
@@ -391,7 +392,11 @@ namespace Engine::Graphics {
         ssbo.pomScale = m_config.getFloat("pom_scale", 0.05f);
         ssbo.usePOM = m_config.getBool("enable_pom", true) ? 1 : 0;
         ssbo.usePBR = m_config.getBool("enable_pbr", true) ? 1 : 0;
-        ssbo.padding = 0.0f;
+        
+        // Push the new UI displacement settings securely across the bus
+        ssbo.useDisplacement = m_config.getBool("enable_displacement", true) ? 1 : 0;
+        ssbo.displacementScale = m_config.getFloat("displacement_scale", 0.1f);
+        
         memcpy(m_globalSsboMapped[m_currentFrame], &ssbo, sizeof(GlobalSSBO));
 
         VkRenderPassBeginInfo renderPassInfo{};
@@ -426,7 +431,6 @@ namespace Engine::Graphics {
         scissor.offset = {0, 0}; scissor.extent = m_swapchain->getExtent();
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        // BIND SET 0: The Global Storage Buffer (SSBO)
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline->getLayout(), 0, 1, &m_globalDescriptorSets[m_currentFrame], 0, nullptr);
 
         for (const auto& entity : activeEntities) {
@@ -442,13 +446,11 @@ namespace Engine::Graphics {
             modelMatrix = glm::rotate(modelMatrix, glm::radians(entity.transform.rotation.z), glm::vec3(0, 0, 1));
             modelMatrix = glm::scale(modelMatrix, entity.transform.scale);
 
-            // Push Constants strictly hold the 64-byte model matrix now. No limit breaches!
             vkCmdPushConstants(commandBuffer, m_graphicsPipeline->getLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(glm::mat4), &modelMatrix);
 
             for (const auto& mesh : model->meshes) {
                 if (!mesh.isUploaded) continue;
 
-                // BIND SET 1: Textures
                 vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline->getLayout(), 1, 1, &mesh.descriptorSet, 0, nullptr);
 
                 VkBuffer vertexBuffers[] = { mesh.vertexBuffer };

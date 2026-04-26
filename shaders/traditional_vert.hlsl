@@ -16,18 +16,24 @@ struct VSOutput {
     float3x3 TBN           : MATRIX;
 };
 
-// Global SSBO Configuration
 struct GlobalData {
     float4x4 viewProj;
     float4 camPos;
     float pomScale;
     int usePOM;
     int usePBR;
-    float padding;
+    int useDisplacement;
+    float displacementScale;
+    float3 padding;
 };
+
 [[vk::binding(0, 0)]] StructuredBuffer<GlobalData> globalBuffer;
 
-// Dynamic Push Constants for per-model translation
+// --- VERTEX SHADER TEXTURE ACCESS ---
+// This allows the vertex shader to read the height map directly to warp the 3D geometry
+[[vk::binding(3, 1)]] Texture2D heightTex;
+[[vk::binding(3, 1)]] SamplerState samp;
+
 struct PushConstants {
     float4x4 model;
 };
@@ -36,8 +42,20 @@ struct PushConstants {
 VSOutput main(VSInput input) {
     VSOutput output;
     
-    // Transform vertex position to world space
-    output.WorldPos = mul(pc.model, float4(input.Position, 1.0)).xyz;
+    // We start with the original vertex position
+    float3 localPos = input.Position;
+
+    // --- HARDWARE VERTEX DISPLACEMENT ---
+    // If the user checked "Enable Hardware Vertex Displacement" in the UI, physically push
+    // the geometry outward along its normals!
+    if (globalBuffer[0].useDisplacement == 1) {
+        // Vertex shaders must use SampleLevel because they have no screen-space derivatives for automatic mipmaps
+        float height = heightTex.SampleLevel(samp, input.UV, 0).r;
+        localPos += input.Normal * (height * globalBuffer[0].displacementScale);
+    }
+    
+    // Transform displaced vertex position to world space
+    output.WorldPos = mul(pc.model, float4(localPos, 1.0)).xyz;
     
     // Transform from world space to projection space using the camera
     output.Pos = mul(globalBuffer[0].viewProj, float4(output.WorldPos, 1.0));
@@ -45,22 +63,15 @@ VSOutput main(VSInput input) {
     output.UV = input.UV;
     output.Color = input.Color;
     
-    // Calculate Tangent Space (TBN) Matrix
     float3x3 normalMatrix = (float3x3)pc.model; 
     float3 T = normalize(mul(normalMatrix, input.Tangent.xyz));
     float3 N = normalize(mul(normalMatrix, input.Normal));
     
-    // Re-orthogonalize T with respect to N using Gram-Schmidt process
     T = normalize(T - dot(T, N) * N);
-    
-    // Calculate Bitangent
     float3 B = cross(N, T) * input.Tangent.w; 
     
-    // Construct the TBN Matrix (World Space to Tangent Space)
     output.TBN = float3x3(T, B, N);
     
-    // Transform the Camera and Fragment positions into Tangent Space
-    // We multiply using output.TBN directly, NOT the inverse, to enter Tangent Space!
     output.TangentViewPos = mul(output.TBN, globalBuffer[0].camPos.xyz);
     output.TangentFragPos = mul(output.TBN, output.WorldPos);
     

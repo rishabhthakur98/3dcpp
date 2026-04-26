@@ -10,10 +10,12 @@
 #include "Camera.hpp"
 #include <string>
 #include <vector>
+#include <future>
+#include <atomic>
 
 namespace Engine::Game {
 
-    enum class EngineState { MainMenu, WorldSelect, Settings, Playing, QuitRequested };
+    enum class EngineState { MainMenu, WorldSelect, LoadingWorld, Settings, Playing, QuitRequested };
 
     class GameManager {
     public:
@@ -34,12 +36,17 @@ namespace Engine::Game {
         
         Scene::SceneLoader m_sceneLoader; 
         Input::InputManager m_inputManager;
-        UI::GuiManager m_guiManager; // UI entirely delegated
+        UI::GuiManager m_guiManager; 
         
         Camera m_camera;
         std::vector<Scene::SceneEntity> m_activeEntities; 
 
         EngineState m_state;
+
+        // --- ASYNC LOADING VARIABLES ---
+        std::future<std::vector<Scene::SceneEntity>> m_loadingFuture;
+        std::atomic<int> m_loadProgress{0};
+        std::atomic<int> m_loadTotal{1};
 
         void handlePlaying(float dt); 
         void loadWorld(const std::string& worldName);

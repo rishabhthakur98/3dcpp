@@ -24,7 +24,9 @@ namespace Engine::Graphics {
         float pomScale;
         int usePOM;
         int usePBR;
-        float padding;
+        int useDisplacement;
+        float displacementScale;
+        float padding[3]; // Exact 16-byte structure alignment compliance
     };
 
     class Renderer {

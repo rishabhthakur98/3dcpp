@@ -8,18 +8,20 @@ struct VSOutput {
     float3x3 TBN           : MATRIX;
 };
 
-// Global SSBO Configuration
+// Must perfectly match the 16-byte alignment from the C++ SSBO struct!
 struct GlobalData {
     float4x4 viewProj;
     float4 camPos;
     float pomScale;
     int usePOM;
     int usePBR;
-    float padding;
+    int useDisplacement;
+    float displacementScale;
+    float3 padding;
 };
+
 [[vk::binding(0, 0)]] StructuredBuffer<GlobalData> globalBuffer;
 
-// Texture bindings
 [[vk::binding(0, 1)]] Texture2D albedoTex;
 [[vk::binding(0, 1)]] SamplerState samp;
 [[vk::binding(1, 1)]] Texture2D normalTex;
@@ -28,30 +30,25 @@ struct GlobalData {
 
 static const float PI = 3.14159265359;
 
-// Parallax Occlusion Mapping
 float2 ParallaxMapping(float2 uv, float3 viewDir) {
     if (globalBuffer[0].usePOM == 0) return uv;
     
-    // Dynamic layer calculation based on view angle
     float numLayers = lerp(32.0, 8.0, abs(dot(float3(0, 0, 1), viewDir)));
     float layerDepth = 1.0 / numLayers;
     float currentLayerDepth = 0.0;
     
-    // Calculate the amount to shift the texture coordinates
     float2 P = (viewDir.xy / max(viewDir.z, 0.001)) * globalBuffer[0].pomScale; 
     float2 deltaTexCoords = P / numLayers;
     
     float2 currentTexCoords = uv;
     float currentDepthMapValue = 1.0 - heightTex.Sample(samp, currentTexCoords).r;
     
-    // Step through the depth map until we hit geometry
     while(currentLayerDepth < currentDepthMapValue) {
         currentTexCoords -= deltaTexCoords;
         currentDepthMapValue = 1.0 - heightTex.Sample(samp, currentTexCoords).r;
         currentLayerDepth += layerDepth;
     }
     
-    // Interpolate to smooth out the transition between steps
     float2 prevTexCoords = currentTexCoords + deltaTexCoords;
     float afterDepth  = currentDepthMapValue - currentLayerDepth;
     float beforeDepth = (1.0 - heightTex.Sample(samp, prevTexCoords).r) - currentLayerDepth + layerDepth;
@@ -60,7 +57,6 @@ float2 ParallaxMapping(float2 uv, float3 viewDir) {
     return prevTexCoords * weight + currentTexCoords * (1.0 - weight);
 }
 
-// PBR Mathematical Functions
 float DistributionGGX(float3 N, float3 H, float roughness) {
     float a = roughness * roughness;
     float a2 = a * a;
@@ -98,77 +94,56 @@ float3 FresnelSchlick(float cosTheta, float3 F0) {
 }
 
 float4 main(VSOutput input) : SV_TARGET {
-    // Calculate the view direction in tangent space for Parallax
     float3 viewDirTangent = normalize(input.TangentViewPos - input.TangentFragPos);
     
-    // Apply POM
     float2 texCoords = ParallaxMapping(input.UV, viewDirTangent);
     
-    // The discard command has been removed here to allow UV coords to safely tile beyond 1.0!
-    
-    // Sample core color
     float4 albedoData = albedoTex.Sample(samp, texCoords) * input.Color;
-    float3 albedo = pow(albedoData.rgb, 2.2); // Convert to linear space
+    float3 albedo = pow(albedoData.rgb, 2.2); 
     
     if (globalBuffer[0].usePBR == 0) return float4(albedo, albedoData.a);
 
-    // Sample and unpack the normal map from [0, 1] to [-1, 1]
     float3 tangentNormal = normalTex.Sample(samp, texCoords).rgb * 2.0 - 1.0;
-    
-    // Transform the tangent normal back into World Space
-    // We achieve the inverse transform by multiplying (tangentNormal, TBN matrix)
     float3 N = normalize(mul(tangentNormal, input.TBN));
     
-    // Sample Metallic/Roughness Map (GLTF packs Roughness in Green, Metallic in Blue)
     float4 metRough = metRoughTex.Sample(samp, texCoords);
     float roughness = metRough.g;
     float metallic = metRough.b;
 
-    // View direction in world space
     float3 V = normalize(globalBuffer[0].camPos.xyz - input.WorldPos);
     
-    // Base reflectivity
     float3 F0 = float3(0.04, 0.04, 0.04);
     F0 = lerp(F0, albedo, metallic);
     
-    // Basic Point Light (Hardcoded for now, can be moved to SSBO later)
     float3 lightPos = float3(50.0, 100.0, 50.0);
     float3 lightColor = float3(30000.0, 30000.0, 30000.0);
     
     float3 L = normalize(lightPos - input.WorldPos);
     float3 H = normalize(V + L);
     
-    // Light attenuation (Inverse square law)
     float distance = length(lightPos - input.WorldPos);
     float attenuation = 1.0 / (distance * distance);
     float3 radiance = lightColor * attenuation;
 
-    // Cook-Torrance BRDF Math
     float NDF = DistributionGGX(N, H, roughness);
     float G   = GeometrySmith(N, V, L, roughness);      
     float3 F  = FresnelSchlick(max(dot(H, V), 0.0), F0);
     
     float3 numerator    = NDF * G * F;
-    float denominator   = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001; // + 0.0001 prevents divide by zero
+    float denominator   = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001; 
     float3 specular     = numerator / denominator;
     
-    // Energy conservation
     float3 kS = F;
     float3 kD = float3(1.0, 1.0, 1.0) - kS;
     kD *= 1.0 - metallic;	  
 
-    // Final Lighting Calculation
     float NdotL = max(dot(N, L), 0.0);
     float3 Lo = (kD * albedo / PI + specular) * radiance * NdotL;
 
-    // Apply basic ambient lighting
-    float3 ambient = float3(0.03, 0.03, 0.03) * albedo * metRough.r; // Use red channel for ambient occlusion if available
+    float3 ambient = float3(0.03, 0.03, 0.03) * albedo * metRough.r; 
     float3 color = ambient + Lo;
 
-    // HDR Tonemapping (Reinhard)
     color = color / (color + float3(1.0, 1.0, 1.0));
-    
-    // Gamma Correction
     color = pow(color, float3(1.0/2.2, 1.0/2.2, 1.0/2.2)); 
 
     return float4(color, albedoData.a);

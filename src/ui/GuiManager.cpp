@@ -21,6 +21,10 @@ namespace Engine::UI {
         m_uiCullEnabled = m_config.getBool("cull_enabled", false);
         m_uiCullMode = m_config.getInt("cull_mode", 0);
         m_uiDevMode = m_config.getBool("dev_mode", true);
+        
+        m_uiDisplacement = m_config.getBool("enable_displacement", true);
+        m_uiDisplacementScale = m_config.getFloat("displacement_scale", 0.1f);
+        
         m_uiCamStartX = m_config.getFloat("cam_start_x", 0.0f);
         m_uiCamStartY = m_config.getFloat("cam_start_y", 0.0f);
         m_uiCamStartZ = m_config.getFloat("cam_start_z", 0.0f);
@@ -47,6 +51,10 @@ namespace Engine::UI {
         m_config.setBool("dev_mode", m_uiDevMode);
         m_config.setBool("cull_enabled", m_uiCullEnabled);
         m_config.setInt("cull_mode", m_uiCullMode);
+        
+        m_config.setBool("enable_displacement", m_uiDisplacement);
+        m_config.setFloat("displacement_scale", m_uiDisplacementScale);
+        
         m_config.setFloat("cam_start_x", m_uiCamStartX);
         m_config.setFloat("cam_start_y", m_uiCamStartY);
         m_config.setFloat("cam_start_z", m_uiCamStartZ);
@@ -135,6 +143,24 @@ namespace Engine::UI {
         ImGui::PopStyleColor(2);
     }
 
+    void GuiManager::renderLoadingScreen(float progress) {
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+        ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.1f, 0.1f, 0.1f, 1.0f)); 
+        
+        ImGui::Begin("Loading", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
+        ImGui::Dummy(ImVec2(0.0f, ImGui::GetIO().DisplaySize.y / 2.0f - 50.0f)); 
+        
+        ImGui::SetCursorPosX(ImGui::GetIO().DisplaySize.x / 2.0f - 150.0f);
+        ImGui::Text("Extracting Assets to RAM... %d%%", static_cast<int>(progress * 100));
+        
+        ImGui::SetCursorPosX(ImGui::GetIO().DisplaySize.x / 2.0f - 150.0f);
+        ImGui::ProgressBar(progress, ImVec2(300.0f, 20.0f));
+
+        ImGui::End();
+        ImGui::PopStyleColor();
+    }
+
     void GuiManager::renderSettings(Game::Camera& camera, std::function<void()> onBack) {
         static bool loaded = false;
         if (!loaded) { loadConfigToUI(camera); loaded = true; }
@@ -210,7 +236,7 @@ namespace Engine::UI {
 
                 ImGui::Dummy(ImVec2(0.0f, 10.0f)); ImGui::Separator(); ImGui::Dummy(ImVec2(0.0f, 10.0f));
 
-                ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "AAA PBR/POM Pipeline:");
+                ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "AAA PBR & Displacement Pipeline:");
                 
                 bool usePbr = m_config.getBool("enable_pbr", true);
                 if(ImGui::Checkbox("Enable PBR Lighting", &usePbr)) m_config.setBool("enable_pbr", usePbr);
@@ -222,6 +248,13 @@ namespace Engine::UI {
                 float pomScale = m_config.getFloat("pom_scale", 0.05f);
                 if(ImGui::SliderFloat("POM Displacement Depth", &pomScale, 0.01f, 0.2f)) m_config.setFloat("pom_scale", pomScale);
                 if (!usePom) ImGui::EndDisabled();
+
+                // --- NEW: Hardware Displacement UI ---
+                ImGui::Dummy(ImVec2(0.0f, 10.0f));
+                ImGui::Checkbox("Enable Hardware Vertex Displacement", &m_uiDisplacement);
+                if (!m_uiDisplacement) ImGui::BeginDisabled();
+                ImGui::SliderFloat("Vertex Displacement Scale", &m_uiDisplacementScale, 0.01f, 2.0f);
+                if (!m_uiDisplacement) ImGui::EndDisabled();
 
                 ImGui::Dummy(ImVec2(0.0f, 10.0f)); ImGui::Separator(); ImGui::Dummy(ImVec2(0.0f, 10.0f));
 
@@ -272,7 +305,7 @@ namespace Engine::UI {
         ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f));
         ImGui::Begin("Overlay", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysAutoResize);
         ImGui::TextColored(ImVec4(0,1,0,1), "GAMEPLAY ACTIVE (6DOF Camera)");
-        ImGui::Text("Entities Extracted to RAM: %zu", activeEntitiesCount);
+        ImGui::Text("Entities Rendered: %zu", activeEntitiesCount);
         
         if (isDevMode) {
             ImGui::Dummy(ImVec2(0.0f, 5.0f));
